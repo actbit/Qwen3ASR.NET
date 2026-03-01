@@ -141,6 +141,167 @@ public sealed class Qwen3Asr : IDisposable
     }
 
     /// <summary>
+    /// Transcribes audio from WAV bytes.
+    /// </summary>
+    /// <param name="wavBytes">Byte array containing WAV file data.</param>
+    /// <param name="language">Optional language code (e.g., "Japanese", "English"). If null, auto-detects.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The transcription result.</returns>
+    /// <exception cref="ObjectDisposedException">Thrown when this instance is disposed.</exception>
+    /// <exception cref="Qwen3AsrException">Thrown when transcription fails.</exception>
+    public async Task<TranscriptionResult> TranscribeWavBytesAsync(
+        byte[] wavBytes,
+        string? language = null,
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        ArgumentNullException.ThrowIfNull(wavBytes);
+
+        return await Task.Run(() =>
+        {
+            var languagePtr = StringToPtr(language);
+
+            try
+            {
+                var result = NativeBindings.qwen3_asr_transcribe_wav_bytes(
+                    _handle,
+                    wavBytes,
+                    (UIntPtr)wavBytes.Length,
+                    languagePtr);
+                return ProcessResult(result);
+            }
+            finally
+            {
+                FreeString(languagePtr);
+            }
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Transcribes 16-bit PCM audio bytes (mono, 16kHz).
+    /// </summary>
+    /// <param name="pcmBytes">16-bit PCM audio bytes (little-endian, mono, 16kHz).</param>
+    /// <param name="language">Optional language code (e.g., "Japanese", "English"). If null, auto-detects.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The transcription result.</returns>
+    /// <exception cref="ObjectDisposedException">Thrown when this instance is disposed.</exception>
+    /// <exception cref="Qwen3AsrException">Thrown when transcription fails.</exception>
+    /// <remarks>
+    /// This is a convenience method for the most common raw audio format.
+    /// The input should be 16-bit signed integer PCM data at 16kHz mono.
+    /// </remarks>
+    public async Task<TranscriptionResult> TranscribePcm16Async(
+        byte[] pcmBytes,
+        string? language = null,
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        ArgumentNullException.ThrowIfNull(pcmBytes);
+
+        if (pcmBytes.Length % 2 != 0)
+            throw new ArgumentException("PCM byte count must be even (16-bit samples)", nameof(pcmBytes));
+
+        return await Task.Run(() =>
+        {
+            var languagePtr = StringToPtr(language);
+
+            try
+            {
+                var result = NativeBindings.qwen3_asr_transcribe_pcm16(
+                    _handle,
+                    pcmBytes,
+                    (UIntPtr)pcmBytes.Length,
+                    languagePtr);
+                return ProcessResult(result);
+            }
+            finally
+            {
+                FreeString(languagePtr);
+            }
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Transcribes raw audio bytes with format specification.
+    /// </summary>
+    /// <param name="audioBytes">Raw audio byte data.</param>
+    /// <param name="format">Audio format specification.</param>
+    /// <param name="language">Optional language code (e.g., "Japanese", "English"). If null, auto-detects.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The transcription result.</returns>
+    /// <exception cref="ObjectDisposedException">Thrown when this instance is disposed.</exception>
+    /// <exception cref="Qwen3AsrException">Thrown when transcription fails.</exception>
+    /// <remarks>
+    /// The audio will be automatically resampled to 16kHz and converted to mono if necessary.
+    /// </remarks>
+    public async Task<TranscriptionResult> TranscribeRawBytesAsync(
+        byte[] audioBytes,
+        AudioFormat format,
+        string? language = null,
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        ArgumentNullException.ThrowIfNull(audioBytes);
+        ArgumentNullException.ThrowIfNull(format);
+
+        return await Task.Run(() =>
+        {
+            var languagePtr = StringToPtr(language);
+            var ffiFormat = new NativeBindings.AudioFormatFFI
+            {
+                SampleRate = format.SampleRate,
+                Channels = format.Channels,
+                BitsPerSample = format.BitsPerSample,
+                IsFloat = format.IsFloat
+            };
+
+            try
+            {
+                var result = NativeBindings.qwen3_asr_transcribe_raw_bytes(
+                    _handle,
+                    audioBytes,
+                    (UIntPtr)audioBytes.Length,
+                    ref ffiFormat,
+                    languagePtr);
+                return ProcessResult(result);
+            }
+            finally
+            {
+                FreeString(languagePtr);
+            }
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Transcribes audio from a Stream containing WAV data.
+    /// </summary>
+    /// <param name="stream">Stream containing WAV file data.</param>
+    /// <param name="language">Optional language code (e.g., "Japanese", "English"). If null, auto-detects.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The transcription result.</returns>
+    /// <exception cref="ObjectDisposedException">Thrown when this instance is disposed.</exception>
+    /// <exception cref="Qwen3AsrException">Thrown when transcription fails.</exception>
+    public async Task<TranscriptionResult> TranscribeWavStreamAsync(
+        Stream stream,
+        string? language = null,
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        ArgumentNullException.ThrowIfNull(stream);
+
+        // Read stream to byte array
+        using var memoryStream = new MemoryStream();
+        await stream.CopyToAsync(memoryStream, cancellationToken).ConfigureAwait(false);
+        var wavBytes = memoryStream.ToArray();
+
+        return await TranscribeWavBytesAsync(wavBytes, language, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Transcribes audio samples.
     /// </summary>
     /// <param name="audioSamples">Audio samples as 32-bit floats (16kHz, mono).</param>

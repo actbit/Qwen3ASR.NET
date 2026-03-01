@@ -80,6 +80,34 @@ internal static class NativeBindings
         public IntPtr ErrorMessage;
     }
 
+    /// <summary>
+    /// Audio format specification for raw audio bytes.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct AudioFormatFFI
+    {
+        /// <summary>
+        /// Sample rate in Hz (e.g., 16000, 44100).
+        /// </summary>
+        public uint SampleRate;
+
+        /// <summary>
+        /// Number of channels (1 = mono, 2 = stereo).
+        /// </summary>
+        public ushort Channels;
+
+        /// <summary>
+        /// Bits per sample (8, 16, 24, 32).
+        /// </summary>
+        public ushort BitsPerSample;
+
+        /// <summary>
+        /// Whether the audio is in floating-point format.
+        /// </summary>
+        [MarshalAs(UnmanagedType.U1)]
+        public bool IsFloat;
+    }
+
     #endregion
 
     #region FFI Functions
@@ -109,6 +137,37 @@ internal static class NativeBindings
     public static extern TranscriptionResultFFI qwen3_asr_transcribe_file(
         IntPtr handle,
         IntPtr filePath,
+        IntPtr language);
+
+    /// <summary>
+    /// Transcribe audio from WAV bytes.
+    /// </summary>
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern TranscriptionResultFFI qwen3_asr_transcribe_wav_bytes(
+        IntPtr handle,
+        [In] byte[] wavBytes,
+        UIntPtr len,
+        IntPtr language);
+
+    /// <summary>
+    /// Transcribe 16-bit PCM audio bytes (mono, 16kHz).
+    /// </summary>
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern TranscriptionResultFFI qwen3_asr_transcribe_pcm16(
+        IntPtr handle,
+        [In] byte[] pcmBytes,
+        UIntPtr len,
+        IntPtr language);
+
+    /// <summary>
+    /// Transcribe raw audio bytes with format specification.
+    /// </summary>
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern TranscriptionResultFFI qwen3_asr_transcribe_raw_bytes(
+        IntPtr handle,
+        [In] byte[] audioBytes,
+        UIntPtr len,
+        ref AudioFormatFFI format,
         IntPtr language);
 
     /// <summary>
