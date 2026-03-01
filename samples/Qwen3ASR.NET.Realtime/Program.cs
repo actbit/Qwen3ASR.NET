@@ -4,7 +4,7 @@ using Qwen3ASR.NET;
 using Qwen3ASR.NET.Enums;
 using Qwen3ASR.NET.Models;
 
-namespace Qwen3ASR.NET.Sample;
+namespace Qwen3ASR.NET.Realtime;
 
 class Program
 {
@@ -21,8 +21,6 @@ class Program
         var modelPath = "Qwen/Qwen3-ASR-0.6B";
         Language? language = null;
         int? deviceIndex = null;
-        bool useVad = true;  // VAD enabled by default
-        float vadThreshold = 0.01f;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -39,12 +37,6 @@ class Program
                 case "-d":
                 case "--device":
                     deviceIndex = int.Parse(args[++i]);
-                    break;
-                case "--no-vad":
-                    useVad = false;
-                    break;
-                case "--vad-threshold":
-                    vadThreshold = float.Parse(args[++i]);
                     break;
                 case "-h":
                 case "--help":
@@ -68,7 +60,7 @@ class Program
             ListAudioDevices();
 
             // Start real-time transcription
-            await RunRealtimeTranscription(asr, language, deviceIndex, useVad, vadThreshold);
+            await RunRealtimeTranscription(asr, language, deviceIndex);
         }
         catch (Exception ex)
         {
@@ -82,24 +74,21 @@ class Program
 
     static void PrintHelp()
     {
-        Console.WriteLine("Usage: Qwen3ASR.NET.Sample [options]");
+        Console.WriteLine("Usage: Qwen3ASR.NET.Realtime [options]");
         Console.WriteLine();
         Console.WriteLine("Options:");
         Console.WriteLine("  -m, --model <path>      Model path or HuggingFace ID (default: Qwen/Qwen3-ASR-0.6B)");
         Console.WriteLine("  -l, --language <lang>   Language code (Japanese, English, Chinese, etc.)");
         Console.WriteLine("  -d, --device <index>    Audio input device index");
-        Console.WriteLine("  --no-vad               Disable Voice Activity Detection");
-        Console.WriteLine("  --vad-threshold <val>  VAD energy threshold (default: 0.01)");
         Console.WriteLine("  -h, --help              Show this help message");
         Console.WriteLine();
         Console.WriteLine("Examples:");
-        Console.WriteLine("  Qwen3ASR.NET.Sample");
-        Console.WriteLine("  Qwen3ASR.NET.Sample -l Japanese");
-        Console.WriteLine("  Qwen3ASR.NET.Sample -l English -d 1");
-        Console.WriteLine("  Qwen3ASR.NET.Sample --no-vad");
+        Console.WriteLine("  Qwen3ASR.NET.Realtime");
+        Console.WriteLine("  Qwen3ASR.NET.Realtime -l Japanese");
+        Console.WriteLine("  Qwen3ASR.NET.Realtime -l English -d 1");
     }
 
-    static Language ParseLanguage(string lang)
+    static Language? ParseLanguage(string lang)
     {
         return lang.ToLowerInvariant() switch
         {

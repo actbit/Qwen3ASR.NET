@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "Qwen3ASR.NET.Sample": {
+      "commandName": "Project",
+      "commandLineArgs": "-l ja -d 0"
+    }
+  }
+}
