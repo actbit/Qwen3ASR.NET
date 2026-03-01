@@ -1,0 +1,149 @@
+<Project>
+  <!--
+    Directory.Build.targets - Auto-build Rust FFI library
+
+    This file automatically builds the Rust native library when building
+    Runtime packages. It detects the platform and builds accordingly.
+  -->
+
+  <!-- Skip for projects that don't need native builds -->
+  <PropertyGroup>
+    <_SkipNativeBuild Condition="'$(MSBuildProjectName)' != 'Qwen3ASR.NET.Runtime.Win-x64'
+                                  AND '$(MSBuildProjectName)' != 'Qwen3ASR.NET.Runtime.Linux-x64'
+                                  AND '$(MSBuildProjectName)' != 'Qwen3ASR.NET.Runtime.OSX-x64'
+                                  AND '$(MSBuildProjectName)' != 'Qwen3ASR.NET.Runtime.OSX-arm64'">true</_SkipNativeBuild>
+  </PropertyGroup>
+
+  <!-- Platform-specific configuration -->
+  <PropertyGroup Condition="'$(_SkipNativeBuild)' != 'true'">
+    <!-- Rust project paths -->
+    <RustProjectDir>$(MSBuildThisFileDirectory)qwen3_asr_ffi\</RustProjectDir>
+    <RustTargetDir>$(RustProjectDir)target\</RustTargetDir>
+
+    <!-- Windows x64 -->
+    <NativeDllName Condition="$(MSBuildProjectName.Contains('Win-x64'))">qwen3_asr_ffi.dll</NativeDllName>
+    <RustTarget Condition="$(MSBuildProjectName.Contains('Win-x64'))">x86_64-pc-windows-msvc</RustTarget>
+    <RuntimeIdentifier Condition="$(MSBuildProjectName.Contains('Win-x64'))">win-x64</RuntimeIdentifier>
+
+    <!-- Linux x64 -->
+    <NativeDllName Condition="$(MSBuildProjectName.Contains('Linux-x64'))">libqwen3_asr_ffi.so</NativeDllName>
+    <RustTarget Condition="$(MSBuildProjectName.Contains('Linux-x64'))">x86_64-unknown-linux-gnu</RustTarget>
+    <RuntimeIdentifier Condition="$(MSBuildProjectName.Contains('Linux-x64'))">linux-x64</RuntimeIdentifier>
+
+    <!-- macOS x64 -->
+    <NativeDllName Condition="$(MSBuildProjectName.Contains('OSX-x64'))">libqwen3_asr_ffi.dylib</NativeDllName>
+    <RustTarget Condition="$(MSBuildProjectName.Contains('OSX-x64'))">x86_64-apple-darwin</RustTarget>
+    <RuntimeIdentifier Condition="$(MSBuildProjectName.Contains('OSX-x64'))">osx-x64</RuntimeIdentifier>
+
+    <!-- macOS arm64 -->
+    <NativeDllName Condition="$(MSBuildProjectName.Contains('OSX-arm64'))">libqwen3_asr_ffi.dylib</NativeDllName>
+    <RustTarget Condition="$(MSBuildProjectName.Contains('OSX-arm64'))">aarch64-apple-darwin</RustTarget>
+    <RuntimeIdentifier Condition="$(MSBuildProjectName.Contains('OSX-arm64'))">osx-arm64</RuntimeIdentifier>
+
+    <!-- Output paths -->
+    <NativeOutputPath>$(MSBuildProjectDirectory)\runtimes\$(RuntimeIdentifier)\native\</NativeOutputPath>
+    <RustBuildOutput>$(RustTargetDir)\$(RustConfiguration)\$(NativeDllName)</RustBuildOutput>
+
+    <!-- Default to release build -->
+    <RustConfiguration Condition="'$(RustConfiguration)' == ''">release</RustConfiguration>
+
+    <!-- Skip Rust build if requested -->
+    <SkipRustBuild Condition="'$(SkipRustBuild)' == ''">false</SkipRustBuild>
+  </PropertyGroup>
+
+  <!-- Build Rust library before building the project -->
+  <Target Name="BuildRustLibrary"
+          BeforeTargets="BeforeBuild"
+          Condition="'$(_SkipNativeBuild)' != 'true' AND '$(SkipRustBuild)' != 'true'">
+
+    <Message Importance="high" Text="Building Rust FFI library for $(RuntimeIdentifier)..." />
+    <Message Importance="low" Text="  RustProjectDir: $(RustProjectDir)" />
+    <Message Importance="low" Text="  RustTarget: $(RustTarget)" />
+    <Message Importance="low" Text="  RustConfiguration: $(RustConfiguration)" />
+
+    <!-- Check if cargo is available -->
+    <Exec Command="cargo --version"
+          ConsoleToMSBuild="true"
+          Condition="'$(OS)' == 'Windows_NT'">
+      <Output TaskParameter="ConsoleOutput" PropertyName="CargoVersion" />
+    </Exec>
+
+    <Exec Command="cargo --version"
+          ConsoleToMSBuild="true"
+          Condition="'$(OS)' != 'Windows_NT'">
+      <Output TaskParameter="ConsoleOutput" PropertyName="CargoVersion" />
+    </Exec>
+
+    <Error Condition="'$(CargoVersion)' == ''"
+           Text="Cargo (Rust build tool) is not installed or not in PATH. Please install Rust from https://rustup.rs/" />
+
+    <Message Importance="low" Text="  Cargo version: $(CargoVersion)" />
+
+    <!-- Build the Rust library -->
+    <!-- On Windows, build directly. On other platforms, cross-compile if needed. -->
+    <PropertyGroup>
+      <CargoBuildCommand Condition="'$(RustConfiguration)' == 'release'">cargo build --release</CargoBuildCommand>
+      <CargoBuildCommand Condition="'$(RustConfiguration)' != 'release'">cargo build</CargoBuildCommand>
+
+      <!-- Add target if cross-compiling (not the host target) -->
+      <CargoBuildCommand Condition="$(MSBuildProjectName.Contains('Win-x64')) AND '$(OS)' == 'Windows_NT'">$(CargoBuildCommand)</CargoBuildCommand>
+      <CargoBuildCommand Condition="$(MSBuildProjectName.Contains('Linux-x64')) AND '$(OS)' != 'Unix'">$(CargoBuildCommand) --target $(RustTarget)</CargoBuildCommand>
+      <CargoBuildCommand Condition="$(MSBuildProjectName.Contains('OSX'))">$(CargoBuildCommand) --target $(RustTarget)</CargoBuildCommand>
+    </PropertyGroup>
+
+    <Exec Command="$(CargoBuildCommand)"
+          WorkingDirectory="$(RustProjectDir)"
+          ConsoleToMSBuild="false">
+      <Output TaskParameter="ExitCode" PropertyName="CargoExitCode" />
+    </Exec>
+
+    <Error Condition="'$(CargoExitCode)' != '0'"
+           Text="Rust build failed with exit code $(CargoExitCode)" />
+
+    <Message Importance="high" Text="Rust build completed successfully" />
+
+    <!-- Determine the actual output path (cargo uses different paths for cross-compilation) -->
+    <PropertyGroup>
+      <_ActualRustBuildOutput Condition="Exists('$(RustTargetDir)\$(RustConfiguration)\$(NativeDllName)')">$(RustTargetDir)\$(RustConfiguration)\$(NativeDllName)</_ActualRustBuildOutput>
+      <_ActualRustBuildOutput Condition="Exists('$(RustTargetDir)\$(RustTarget)\$(RustConfiguration)\$(NativeDllName)')">$(RustTargetDir)\$(RustTarget)\$(RustConfiguration)\$(NativeDllName)</_ActualRustBuildOutput>
+      <_ActualRustBuildOutput Condition="'$(_ActualRustBuildOutput)' == ''">$(RustBuildOutput)</_ActualRustBuildOutput>
+    </PropertyGroup>
+
+    <Message Importance="low" Text="  Looking for native library at: $(_ActualRustBuildOutput)" />
+
+    <!-- Ensure output directory exists -->
+    <MakeDir Directories="$(NativeOutputPath)" />
+
+    <!-- Copy the native library to the runtimes folder -->
+    <Copy SourceFiles="$(_ActualRustBuildOutput)"
+          DestinationFolder="$(NativeOutputPath)"
+          Condition="Exists('$(_ActualRustBuildOutput)')">
+      <Output TaskParameter="CopiedFiles" PropertyName="CopiedNativeDll" />
+    </Copy>
+
+    <Warning Condition="!Exists('$(_ActualRustBuildOutput)')"
+             Text="Native library not found at $(_ActualRustBuildOutput). You may need to build it manually." />
+
+    <Message Importance="high"
+             Text="Copied native library to $(NativeOutputPath)$(NativeDllName)"
+             Condition="Exists('$(NativeOutputPath)$(NativeDllName)')" />
+  </Target>
+
+  <!-- Clean Rust build artifacts -->
+  <Target Name="CleanRustLibrary"
+          AfterTargets="Clean"
+          Condition="'$(_SkipNativeBuild)' != 'true'">
+
+    <Message Importance="normal" Text="Cleaning Rust build artifacts..." />
+
+    <Exec Command="cargo clean"
+          WorkingDirectory="$(RustProjectDir)"
+          Condition="Exists('$(RustProjectDir)')"
+          ContinueOnError="true" />
+
+    <!-- Also remove copied native library -->
+    <Delete Files="$(NativeOutputPath)$(NativeDllName)"
+            Condition="Exists('$(NativeOutputPath)$(NativeDllName)')" />
+  </Target>
+
+</Project>

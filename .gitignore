@@ -361,3 +361,13 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# Rust build artifacts
+qwen3_asr_ffi/target/
+qwen3_asr_ffi/Cargo.lock
+
+# Native runtime libraries (built from Rust)
+# These are built automatically during .NET build
+src/Qwen3ASR.NET.Runtime.*/runtimes/*/native/*.dll
+src/Qwen3ASR.NET.Runtime.*/runtimes/*/native/*.so
+src/Qwen3ASR.NET.Runtime.*/runtimes/*/native/*.dylib
