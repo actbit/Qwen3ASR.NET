@@ -11,7 +11,7 @@
     <Authors>Qwen3ASR.NET Contributors</Authors>
     <Description>Native runtime for Qwen3ASR.NET (macOS x64/Intel). This package contains the native libqwen3_asr_ffi.dylib library.</Description>
     <PackageTags>speech-recognition;asr;qwen;ai;ml;transcription;native;runtime</PackageTags>
-    <PackageLicenseExpression>MIT OR Apache-2.0</PackageLicenseExpression>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/your-org/Qwen3ASR.NET</PackageProjectUrl>
     <RepositoryUrl>https://github.com/your-org/Qwen3ASR.NET</RepositoryUrl>

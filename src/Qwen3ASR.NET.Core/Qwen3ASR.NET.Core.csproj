@@ -13,7 +13,7 @@
     <Authors>Qwen3ASR.NET Contributors</Authors>
     <Description>Core managed library for Qwen3ASR.NET - Qwen3-ASR speech recognition for .NET (requires runtime package)</Description>
     <PackageTags>speech-recognition;asr;qwen;ai;ml;transcription</PackageTags>
-    <PackageLicenseExpression>MIT OR Apache-2.0</PackageLicenseExpression>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/your-org/Qwen3ASR.NET</PackageProjectUrl>
     <RepositoryUrl>https://github.com/your-org/Qwen3ASR.NET</RepositoryUrl>
