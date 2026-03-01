@@ -27,6 +27,7 @@
 
   <ItemGroup>
     <None Include="runtimes\**\*" Pack="true" PackagePath="runtimes" />
+    <Content Include="runtimes\osx-arm64\native\libqwen3_asr_ffi.dylib" CopyToOutputDirectory="PreserveNewest" Link="libqwen3_asr_ffi.dylib" />
     <None Include="..\..\README.md" Pack="true" PackagePath="" Condition="Exists('..\..\README.md')" />
   </ItemGroup>
 

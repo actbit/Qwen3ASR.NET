@@ -27,6 +27,7 @@
 
   <ItemGroup>
     <None Include="runtimes\**\*" Pack="true" PackagePath="runtimes" />
+    <Content Include="runtimes\linux-x64\native\libqwen3_asr_ffi.so" CopyToOutputDirectory="PreserveNewest" Link="libqwen3_asr_ffi.so" />
     <None Include="..\..\README.md" Pack="true" PackagePath="" Condition="Exists('..\..\README.md')" />
   </ItemGroup>
 

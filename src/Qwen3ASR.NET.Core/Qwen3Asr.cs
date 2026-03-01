@@ -505,7 +505,7 @@ public sealed class Qwen3Asr : IDisposable
         if (ptr == IntPtr.Zero)
             return null;
 
-        return Marshal.PtrToStringAnsi(ptr);
+        return Marshal.PtrToStringUTF8(ptr);
     }
 
     private static void FreeString(IntPtr ptr)
