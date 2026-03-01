@@ -3,7 +3,10 @@
 //! This module provides the main ASR handle that wraps the qwen3-asr-rs library.
 
 use crate::error::{AudioStage, Qwen3AsrError, Result};
-use crate::{Qwen3AsrDevice, TranscriptionDetail};
+use crate::{Qwen3AsrDevice, Timestamp, TranscriptionDetail};
+
+use candle_core::Device;
+use qwen3_asr::{AudioInput, Batch, LoadOptions, Qwen3Asr, TranscribeOptions};
 
 /// Sample rate for Qwen3-ASR (16kHz)
 const SAMPLE_RATE: u32 = 16000;
@@ -11,35 +14,20 @@ const SAMPLE_RATE: u32 = 16000;
 /// Handle to an ASR instance
 ///
 /// This wraps the actual Qwen3Asr model from qwen3-asr-rs.
+#[allow(dead_code)]
 pub struct AsrHandle {
     /// Model path or HuggingFace model ID
     model_path: String,
     /// Device for inference
     device: Qwen3AsrDevice,
-    /// Optional revision for HuggingFace models
+    /// Optional revision for HuggingFace models (not currently used by qwen3-asr-rs)
     revision: Option<String>,
     /// Number of threads for CPU inference
     num_threads: usize,
     /// The actual ASR model
-    model: Option<Box<Qwen3AsrModel>>,
-}
-
-/// Wrapper for the actual Qwen3-ASR model
-enum Qwen3AsrModel {
-    /// CPU-based model
-    Cpu {
-        /// In a real implementation, this would be:
-        /// model: qwen3_asr::Qwen3Asr
-        _placeholder: (),
-    },
-    /// CUDA-based model
-    Cuda {
-        _placeholder: (),
-    },
-    /// Metal-based model (macOS)
-    Metal {
-        _placeholder: (),
-    },
+    model: Option<Qwen3Asr>,
+    /// The candle device
+    candle_device: Option<Device>,
 }
 
 impl AsrHandle {
@@ -88,6 +76,7 @@ impl AsrHandle {
             revision,
             num_threads,
             model: None,
+            candle_device: None,
         };
 
         handle.load_model()?;
@@ -110,75 +99,41 @@ impl AsrHandle {
         );
 
         // Initialize device
-        self.initialize_device()?;
+        let device = self.initialize_device()?;
 
-        // TODO: Actual implementation with qwen3-asr-rs
-        //
-        // Example implementation:
-        //
-        // use qwen3_asr::{Qwen3Asr, LoadOptions};
-        // use candle_core::Device;
-        //
-        // // Step 1: Initialize device
-        // let device = match self.device {
-        //     Qwen3AsrDevice::Cpu => Device::Cpu,
-        //     Qwen3AsrDevice::Cuda => {
-        //         Device::new_cuda(0).map_err(|e| {
-        //             Qwen3AsrError::device_init_failed("CUDA", e.to_string())
-        //         })?
-        //     }
-        //     Qwen3AsrDevice::Metal => {
-        //         Device::new_metal(0).map_err(|e| {
-        //             Qwen3AsrError::device_init_failed("Metal", e.to_string())
-        //         })?
-        //     }
-        // };
-        //
-        // // Step 2: Configure load options
-        // let load_options = LoadOptions {
-        //     revision: self.revision.clone(),
-        //     ..Default::default()
-        // };
-        //
-        // // Step 3: Load model (this may download from HuggingFace)
-        // let model = Qwen3Asr::from_pretrained(&self.model_path, &device, &load_options)
-        //     .map_err(|e| {
-        //         Qwen3AsrError::model_load_failed(&self.model_path, LoadStage::WeightLoading)
-        //             .with_context(e.to_string())
-        //     })?;
-        //
-        // self.model = Some(Box::new(model));
+        // Configure load options
+        // Note: revision is not supported in LoadOptions; use full model ID with revision if needed
+        let load_options = LoadOptions::default();
 
-        // Placeholder implementation
-        let model = match self.device {
-            Qwen3AsrDevice::Cpu => Qwen3AsrModel::Cpu { _placeholder: () },
-            Qwen3AsrDevice::Cuda => Qwen3AsrModel::Cuda { _placeholder: () },
-            Qwen3AsrDevice::Metal => Qwen3AsrModel::Metal { _placeholder: () },
-        };
+        // Load model (this may download from HuggingFace)
+        let model = Qwen3Asr::from_pretrained(&self.model_path, &device, &load_options)
+            .map_err(|e| {
+                Qwen3AsrError::model_load_failed(&self.model_path, crate::error::LoadStage::WeightLoading)
+                    .with_context(e.to_string())
+            })?;
 
-        self.model = Some(Box::new(model));
+        self.model = Some(model);
+        self.candle_device = Some(device);
 
         log::info!("Model loaded successfully");
         Ok(())
     }
 
     /// Initialize the compute device
-    fn initialize_device(&self) -> Result<()> {
+    fn initialize_device(&self) -> Result<Device> {
         match self.device {
             Qwen3AsrDevice::Cpu => {
                 log::debug!("Using CPU device with {} threads", self.num_threads);
-                Ok(())
+                Ok(Device::Cpu)
             }
             Qwen3AsrDevice::Cuda => {
                 log::debug!("Initializing CUDA device");
-                // TODO: Check CUDA availability when integrating with qwen3-asr-rs
-                // For now, log a warning if CUDA might not be available
-                log::info!("CUDA device requested - will use GPU acceleration if available");
-                Ok(())
+                Device::new_cuda(0).map_err(|e| {
+                    Qwen3AsrError::device_init_failed("CUDA", e.to_string())
+                })
             }
             Qwen3AsrDevice::Metal => {
                 log::debug!("Initializing Metal device");
-                // TODO: Check Metal availability when integrating with qwen3-asr-rs
                 #[cfg(not(target_os = "macos"))]
                 {
                     log::warn!("Metal is only available on macOS");
@@ -187,8 +142,9 @@ impl AsrHandle {
                 }
                 #[cfg(target_os = "macos")]
                 {
-                    log::info!("Metal device requested - will use GPU acceleration if available");
-                    Ok(())
+                    Device::new_metal(0).map_err(|e| {
+                        Qwen3AsrError::device_init_failed("Metal", e.to_string())
+                    })
                 }
             }
         }
@@ -214,7 +170,7 @@ impl AsrHandle {
         language: Option<&str>,
     ) -> Result<TranscriptionDetail> {
         // Validate model state
-        let _model = self.model.as_ref().ok_or_else(|| {
+        let model = self.model.as_ref().ok_or_else(|| {
             Qwen3AsrError::model_not_loaded()
                 .with_context("Cannot transcribe without a loaded model")
         })?;
@@ -230,40 +186,39 @@ impl AsrHandle {
             language
         );
 
-        // TODO: Actual implementation with qwen3-asr-rs
-        //
-        // use qwen3_asr::AudioInput;
-        //
-        // let audio_input = AudioInput::Waveform {
-        //     samples: audio,
-        //     sample_rate: SAMPLE_RATE,
-        // };
-        //
-        // let result = model.transcribe(&audio_input, language)
-        //     .map_err(|e| {
-        //         Qwen3AsrError::inference_failed("Transcription failed")
-        //             .with_context(e.to_string())
-        //     })?;
-        //
-        // return Ok(TranscriptionDetail {
-        //     text: result.text,
-        //     language: result.language,
-        //     confidence: result.confidence,
-        //     timestamps: result.timestamps.map(|ts| {
-        //         ts.into_iter().map(|t| Timestamp {
-        //             start: t.start,
-        //             end: t.end,
-        //             text: t.text,
-        //         }).collect()
-        //     }),
-        // });
+        // Create audio input
+        let audio_input = AudioInput::Waveform {
+            samples: audio,
+            sample_rate: SAMPLE_RATE,
+        };
 
-        // Placeholder implementation
+        // Configure transcription options
+        let transcribe_opts = TranscribeOptions {
+            language: Batch::one(language.map(|s| s.to_string())),
+            return_timestamps: true,
+            ..Default::default()
+        };
+
+        // Perform transcription
+        let results = model
+            .transcribe(vec![audio_input], transcribe_opts)
+            .map_err(|e| {
+                Qwen3AsrError::inference_failed("Transcription failed")
+                    .with_context(e.to_string())
+            })?;
+
+        // Get the first result (we only transcribed one audio)
+        let result = results.into_iter().next().ok_or_else(|| {
+            Qwen3AsrError::inference_failed("No transcription result returned")
+        })?;
+
+        // Convert result to our TranscriptionDetail type
+        // Note: qwen3-asr-rs doesn't provide confidence scores
         Ok(TranscriptionDetail {
-            text: "[Qwen3-ASR transcription placeholder]".to_string(),
-            language: language.map(|s| s.to_string()),
-            confidence: Some(0.95),
-            timestamps: None,
+            text: result.text,
+            language: Some(result.language),
+            confidence: None,
+            timestamps: parse_timestamps(&result.timestamps),
         })
     }
 
@@ -302,6 +257,21 @@ impl AsrHandle {
 
         // Transcribe the audio
         self.transcribe(&audio_samples, language)
+    }
+
+    /// Check if model is loaded
+    pub fn is_loaded(&self) -> bool {
+        self.model.is_some()
+    }
+
+    /// Get the model path
+    pub fn model_path(&self) -> &str {
+        &self.model_path
+    }
+
+    /// Get the device
+    pub fn device(&self) -> Qwen3AsrDevice {
+        self.device
     }
 
     // =========================================================================
@@ -842,21 +812,30 @@ impl AsrHandle {
 
         Ok(output)
     }
+}
 
-    /// Get the model path
-    pub fn model_path(&self) -> &str {
-        &self.model_path
+/// Parse timestamps from serde_json::Value to Vec<Timestamp>
+fn parse_timestamps(value: &Option<serde_json::Value>) -> Option<Vec<Timestamp>> {
+    let ts_value = value.as_ref()?;
+
+    // Try to parse as array of timestamp objects
+    if let Some(arr) = ts_value.as_array() {
+        let timestamps: Vec<Timestamp> = arr
+            .iter()
+            .filter_map(|item| {
+                let obj = item.as_object()?;
+                let start = obj.get("start")?.as_f64()? as f32;
+                let end = obj.get("end")?.as_f64()? as f32;
+                let text = obj.get("text")?.as_str()?.to_string();
+                Some(Timestamp { start, end, text })
+            })
+            .collect();
+        if !timestamps.is_empty() {
+            return Some(timestamps);
+        }
     }
 
-    /// Get the device
-    pub fn device(&self) -> Qwen3AsrDevice {
-        self.device
-    }
-
-    /// Check if model is loaded
-    pub fn is_loaded(&self) -> bool {
-        self.model.is_some()
-    }
+    None
 }
 
 impl Drop for AsrHandle {

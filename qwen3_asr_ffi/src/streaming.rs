@@ -2,6 +2,9 @@
 //!
 //! This module provides real-time streaming transcription using Qwen3-ASR.
 //! It supports partial results during transcription and final result aggregation.
+//!
+//! Note: Due to lifetime constraints with the underlying library's streaming API,
+//! this implementation uses batch transcription with buffering to simulate streaming.
 
 use crate::error::{Qwen3AsrError, Result};
 use crate::{AsrHandle, Timestamp, TranscriptionDetail};
@@ -13,31 +16,18 @@ const SAMPLE_RATE: u32 = 16000;
 const MAX_BUFFER_SAMPLES: usize = SAMPLE_RATE as usize * 30;
 
 /// Default chunk size in seconds
-const DEFAULT_CHUNK_SIZE_SEC: f32 = 0.5;
+const DEFAULT_CHUNK_SIZE_SEC: f32 = 2.0;
 
 /// Maximum chunk size in seconds
 const MAX_CHUNK_SIZE_SEC: f32 = 10.0;
 
 /// Streaming transcriber for real-time transcription
 ///
-/// This wraps the qwen3-asr-rs streaming API.
+/// This wraps the qwen3-asr-rs library using batch transcription with buffering.
 ///
 /// # Thread Safety
 /// This type is `Send` and `Sync`, but operations are not thread-safe.
 /// Use external synchronization if sharing across threads.
-///
-/// # Example (conceptual)
-/// ```ignore
-/// let asr = Qwen3Asr::from_pretrained("Qwen/Qwen3-ASR-0.6B", &Device::Cpu, &LoadOptions::default())?;
-/// let mut stream = asr.start_stream(StreamOptions::default())?;
-///
-/// // Push audio chunks
-/// let chunk = AudioInput::Waveform { samples: &audio, sample_rate: 16000 };
-/// let partial = stream.push_audio_chunk(&chunk)?;
-///
-/// // Get final result
-/// let final_result = stream.finish()?;
-/// ```
 pub struct StreamingTranscriber {
     /// Reference to the ASR handle
     handle: *const AsrHandle,
@@ -67,7 +57,6 @@ struct TranscriptionSegment {
     text: String,
     start_time: f32,
     end_time: f32,
-    confidence: Option<f32>,
 }
 
 impl StreamingTranscriber {
@@ -76,7 +65,7 @@ impl StreamingTranscriber {
     /// # Arguments
     /// * `handle` - Reference to the ASR handle
     /// * `language` - Optional language hint
-    /// * `chunk_size_sec` - Size of audio chunks in seconds (default: 0.5, max: 10.0)
+    /// * `chunk_size_sec` - Size of audio chunks in seconds (default: 2.0, max: 10.0)
     /// * `enable_timestamps` - Enable timestamp prediction
     /// * `enable_partial_results` - Enable partial results during streaming
     ///
@@ -126,25 +115,6 @@ impl StreamingTranscriber {
             enable_timestamps,
             enable_partial_results
         );
-
-        // TODO: When integrating with actual qwen3-asr-rs:
-        //
-        // use qwen3_asr::StreamOptions;
-        //
-        // let stream_options = StreamOptions {
-        //     language: language.clone(),
-        //     chunk_size_sec,
-        //     enable_timestamps,
-        //     ..Default::default()
-        // };
-        //
-        // let stream = handle.model.as_ref()
-        //     .ok_or_else(|| Qwen3AsrError::model_not_loaded())?
-        //     .start_stream(stream_options)
-        //     .map_err(|e| {
-        //         Qwen3AsrError::stream_push_failed("Failed to start stream")
-        //             .with_context(e.to_string())
-        //     })?;
 
         Ok(Self {
             handle: handle as *const AsrHandle,
@@ -231,39 +201,19 @@ impl StreamingTranscriber {
     ///
     /// This calls the underlying ASR model for transcription.
     fn process_chunk(&mut self, chunk: &[f32]) -> Result<()> {
-        // Safety: handle is valid as long as the AsrHandle exists
-        let handle = unsafe { &*self.handle };
-
-        let chunk_duration_ms = (chunk.len() as f32 / SAMPLE_RATE as f32 * 1000.0) as u32;
         let start_time = self.total_samples_processed as f32 / SAMPLE_RATE as f32;
         let end_time = start_time + chunk.len() as f32 / SAMPLE_RATE as f32;
 
         log::debug!(
             "Processing chunk: {} samples ({:.2}s) at time {:.2}s-{:.2}s",
             chunk.len(),
-            chunk_duration_ms as f32 / 1000.0,
+            chunk.len() as f32 / SAMPLE_RATE as f32,
             start_time,
             end_time
         );
 
-        // TODO: When integrating with actual qwen3-asr-rs:
-        //
-        // use qwen3_asr::AudioInput;
-        //
-        // let audio_input = AudioInput::Waveform {
-        //     samples: chunk,
-        //     sample_rate: SAMPLE_RATE,
-        // };
-        //
-        // let result = self.stream.as_mut()
-        //     .ok_or_else(|| Qwen3AsrError::internal("Stream not initialized"))?
-        //     .push_audio_chunk(&audio_input)
-        //     .map_err(|e| {
-        //         Qwen3AsrError::stream_push_failed("Failed to push audio chunk")
-        //             .with_context(e.to_string())
-        //     })?;
-
-        // Placeholder: use batch transcription
+        // Get handle and transcribe
+        let handle = unsafe { &*self.handle };
         let result = handle.transcribe(chunk, self.language.as_deref()).map_err(|e| {
             Qwen3AsrError::stream_push_failed("Transcription failed")
                 .with_context(e.to_string())
@@ -286,7 +236,6 @@ impl StreamingTranscriber {
                 text: result.text.clone(),
                 start_time,
                 end_time,
-                confidence: result.confidence,
             });
 
             // Update partial result
@@ -309,8 +258,7 @@ impl StreamingTranscriber {
     ///
     /// This method:
     /// 1. Processes any remaining audio in the buffer
-    /// 2. Finalizes the stream
-    /// 3. Returns the complete transcription
+    /// 2. Returns the complete transcription
     ///
     /// After calling this method, the stream cannot be used further.
     ///
@@ -336,8 +284,6 @@ impl StreamingTranscriber {
 
         // Process any remaining audio in buffer
         if !self.buffer.is_empty() {
-            let handle = unsafe { &*self.handle };
-
             let start_time = self.total_samples_processed as f32 / SAMPLE_RATE as f32;
             let end_time = start_time + self.buffer.len() as f32 / SAMPLE_RATE as f32;
 
@@ -349,6 +295,8 @@ impl StreamingTranscriber {
                 end_time
             );
 
+            // Get handle and transcribe
+            let handle = unsafe { &*self.handle };
             let result = handle
                 .transcribe(&self.buffer, self.language.as_deref())
                 .map_err(|e| {
@@ -361,23 +309,13 @@ impl StreamingTranscriber {
                     text: result.text,
                     start_time,
                     end_time,
-                    confidence: result.confidence,
                 });
             }
 
             self.buffer.clear();
         }
 
-        // TODO: When integrating with actual qwen3-asr-rs:
-        //
-        // let final_result = self.stream.take()
-        //     .ok_or_else(|| Qwen3AsrError::internal("Stream not initialized"))?
-        //     .finish()
-        //     .map_err(|e| {
-        //         Qwen3AsrError::inference_failed("Stream finish failed")
-        //             .with_context(e.to_string())
-        //     })?;
-
+        // Build result from accumulated segments
         let result = self.build_current_result();
 
         log::info!(
@@ -414,27 +352,10 @@ impl StreamingTranscriber {
             None
         };
 
-        // Calculate average confidence
-        let confidence = if !self.segments.is_empty() {
-            let sum: f32 = self
-                .segments
-                .iter()
-                .filter_map(|s| s.confidence)
-                .sum();
-            let count = self.segments.iter().filter(|s| s.confidence.is_some()).count();
-            if count > 0 {
-                Some(sum / count as f32)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
         TranscriptionDetail {
             text,
             language: self.language.clone(),
-            confidence,
+            confidence: None,
             timestamps,
         }
     }

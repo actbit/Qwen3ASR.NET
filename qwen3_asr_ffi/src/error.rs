@@ -578,6 +578,14 @@ impl Qwen3AsrError {
         })
     }
 
+    /// Create a device initialization failed error
+    pub fn device_init_failed(device: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self::from_kind(ErrorKind::DeviceInitFailed {
+            device: device.into(),
+            reason: reason.into(),
+        })
+    }
+
     /// Create a null pointer error
     pub fn null_pointer(context: impl Into<String>) -> Self {
         Self::from_kind(ErrorKind::NullPointer {

@@ -15,12 +15,10 @@ crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
 # Qwen3-ASR Rust implementation
-# TODO: Uncomment when the qwen3-asr crate is available
-# The repository uses a workspace structure with the library in crates/qwen3_asr
-# qwen3_asr = { git = "https://github.com/lumosimmo/qwen3-asr-rs", branch = "main" }
+qwen3_asr = { git = "https://github.com/lumosimmo/qwen3-asr-rs", branch = "main" }
 
 # Candle ML framework (required by qwen3-asr)
-# candle-core = "0.4"
+candle-core = "0.9"
 
 # FFI utilities
 libc = "0.2"
