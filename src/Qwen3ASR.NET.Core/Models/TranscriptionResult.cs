@@ -56,6 +56,12 @@ public class TranscriptionResult
     public List<Timestamp>? Timestamps { get; set; }
 
     /// <summary>
+    /// Gets or sets whether this is a partial result (streaming).
+    /// </summary>
+    [JsonPropertyName("is_partial")]
+    public bool IsPartial { get; set; }
+
+    /// <summary>
     /// Returns the transcribed text.
     /// </summary>
     /// <returns>The transcribed text.</returns>
@@ -67,12 +73,6 @@ public class TranscriptionResult
 /// </summary>
 public class TranscriptionDetail : TranscriptionResult
 {
-    /// <summary>
-    /// Gets or sets whether this is a partial result (streaming).
-    /// </summary>
-    [JsonPropertyName("is_partial")]
-    public bool IsPartial { get; set; }
-
     /// <summary>
     /// Gets or sets the processing time in milliseconds.
     /// </summary>

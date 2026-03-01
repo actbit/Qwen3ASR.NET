@@ -1,5 +1,4 @@
 using System.Runtime.InteropServices;
-using Qwen3ASR.NET.Enums;
 
 namespace Qwen3ASR.NET.Native;
 
@@ -12,9 +11,6 @@ internal static class NativeBindings
 
     #region FFI Structures
 
-    /// <summary>
-    /// Result codes for FFI functions (internal).
-    /// </summary>
     internal enum ResultCode
     {
         Success = 0,
@@ -23,207 +19,88 @@ internal static class NativeBindings
         ModelNotLoaded = 3,
         InferenceError = 4,
         MemoryError = 5,
-        StreamError = 6,
         UnknownError = 99
     }
 
-    /// <summary>
-    /// Converts FFI ResultCode to public ErrorCode.
-    /// </summary>
-    public static ErrorCode ToErrorCode(this ResultCode code) => code switch
+    internal enum DeviceTypeFFI
     {
-        ResultCode.Success => ErrorCode.Success,
-        ResultCode.InvalidHandle => ErrorCode.InvalidHandle,
-        ResultCode.InvalidParameter => ErrorCode.InvalidParameter,
-        ResultCode.ModelNotLoaded => ErrorCode.ModelNotLoaded,
-        ResultCode.InferenceError => ErrorCode.InferenceError,
-        ResultCode.MemoryError => ErrorCode.MemoryError,
-        ResultCode.StreamError => ErrorCode.StreamError,
-        _ => ErrorCode.UnknownError
-    };
-
-    /// <summary>
-    /// Options for loading a model (FFI representation).
-    /// </summary>
-    [StructLayout(LayoutKind.Sequential)]
-    public struct LoadOptionsFFI
-    {
-        public DeviceType Device;
-        public IntPtr ModelPath;
-        public IntPtr Revision;
-        public int NumThreads;
+        Cpu = 0,
+        Cuda = 1,
+        Metal = 2
     }
 
-    /// <summary>
-    /// Options for streaming transcription (FFI representation).
-    /// </summary>
     [StructLayout(LayoutKind.Sequential)]
-    public struct StreamOptionsFFI
+    internal struct TranscribeOptionsFFI
     {
+        public IntPtr Context;
         public IntPtr Language;
-        public float ChunkSizeSec;
         [MarshalAs(UnmanagedType.U1)]
-        public bool EnableTimestamps;
+        public bool ReturnTimestamps;
+        public int MaxNewTokens;
+        public int MaxBatchSize;
+        public float ChunkMaxSec;
         [MarshalAs(UnmanagedType.U1)]
-        public bool EnablePartialResults;
+        public bool BucketByLength;
     }
 
-    /// <summary>
-    /// Transcription result (FFI representation).
-    /// </summary>
     [StructLayout(LayoutKind.Sequential)]
-    public struct TranscriptionResultFFI
+    internal struct TranscriptionResultFFI
     {
-        public IntPtr Text;
-        public IntPtr JsonResult;
+        public IntPtr Json;
         public ResultCode Code;
-        public IntPtr ErrorMessage;
-    }
-
-    /// <summary>
-    /// Audio format specification for raw audio bytes.
-    /// </summary>
-    [StructLayout(LayoutKind.Sequential)]
-    public struct AudioFormatFFI
-    {
-        /// <summary>
-        /// Sample rate in Hz (e.g., 16000, 44100).
-        /// </summary>
-        public uint SampleRate;
-
-        /// <summary>
-        /// Number of channels (1 = mono, 2 = stereo).
-        /// </summary>
-        public ushort Channels;
-
-        /// <summary>
-        /// Bits per sample (8, 16, 24, 32).
-        /// </summary>
-        public ushort BitsPerSample;
-
-        /// <summary>
-        /// Whether the audio is in floating-point format.
-        /// </summary>
-        [MarshalAs(UnmanagedType.U1)]
-        public bool IsFloat;
+        public IntPtr Error;
     }
 
     #endregion
 
-    #region FFI Functions
+    #region FFI Functions - Model Management
 
-    /// <summary>
-    /// Create a new ASR instance.
-    /// </summary>
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern IntPtr qwen3_asr_create(
-        ref LoadOptionsFFI options,
-        out IntPtr errorMessage);
+    internal static extern IntPtr qwen3_asr_load(
+        IntPtr modelPath,
+        DeviceTypeFFI device,
+        out IntPtr errorMsg);
 
-    /// <summary>
-    /// Transcribe audio data (offline/batch mode).
-    /// </summary>
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern TranscriptionResultFFI qwen3_asr_transcribe(
+    internal static extern void qwen3_asr_destroy(IntPtr handle);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static extern bool qwen3_asr_is_loaded(IntPtr handle);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern IntPtr qwen3_asr_supported_languages(IntPtr handle);
+
+    #endregion
+
+    #region FFI Functions - Transcription
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern TranscriptionResultFFI qwen3_asr_transcribe(
         IntPtr handle,
-        [In] float[] audioData,
-        UIntPtr len,
-        IntPtr language);
+        [In] float[] samples,
+        UIntPtr sampleCount,
+        uint sampleRate,
+        ref TranscribeOptionsFFI options);
 
-    /// <summary>
-    /// Transcribe audio from a file.
-    /// </summary>
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern TranscriptionResultFFI qwen3_asr_transcribe_file(
+    internal static extern TranscriptionResultFFI qwen3_asr_transcribe_file(
         IntPtr handle,
         IntPtr filePath,
-        IntPtr language);
+        ref TranscribeOptionsFFI options);
 
-    /// <summary>
-    /// Transcribe audio from WAV bytes.
-    /// </summary>
-    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern TranscriptionResultFFI qwen3_asr_transcribe_wav_bytes(
-        IntPtr handle,
-        [In] byte[] wavBytes,
-        UIntPtr len,
-        IntPtr language);
+    #endregion
 
-    /// <summary>
-    /// Transcribe 16-bit PCM audio bytes (mono, 16kHz).
-    /// </summary>
-    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern TranscriptionResultFFI qwen3_asr_transcribe_pcm16(
-        IntPtr handle,
-        [In] byte[] pcmBytes,
-        UIntPtr len,
-        IntPtr language);
+    #region FFI Functions - Memory Management
 
-    /// <summary>
-    /// Transcribe raw audio bytes with format specification.
-    /// </summary>
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern TranscriptionResultFFI qwen3_asr_transcribe_raw_bytes(
-        IntPtr handle,
-        [In] byte[] audioBytes,
-        UIntPtr len,
-        ref AudioFormatFFI format,
-        IntPtr language);
+    internal static extern void qwen3_asr_free_result(ref TranscriptionResultFFI result);
 
-    /// <summary>
-    /// Start a streaming transcription session.
-    /// </summary>
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern IntPtr qwen3_asr_stream_start(
-        IntPtr handle,
-        ref StreamOptionsFFI options);
+    internal static extern void qwen3_asr_free_string(IntPtr ptr);
 
-    /// <summary>
-    /// Push audio chunk to streaming session.
-    /// </summary>
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern TranscriptionResultFFI qwen3_asr_stream_push(
-        IntPtr streamHandle,
-        [In] float[] audioData,
-        UIntPtr len);
-
-    /// <summary>
-    /// Get partial result from streaming session.
-    /// </summary>
-    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern TranscriptionResultFFI qwen3_asr_stream_get_partial(
-        IntPtr streamHandle);
-
-    /// <summary>
-    /// Finish streaming session and get final result.
-    /// </summary>
-    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern TranscriptionResultFFI qwen3_asr_stream_finish(
-        IntPtr streamHandle);
-
-    /// <summary>
-    /// Free a transcription result.
-    /// </summary>
-    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern void qwen3_asr_free_result(ref TranscriptionResultFFI result);
-
-    /// <summary>
-    /// Free a string returned by FFI.
-    /// </summary>
-    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern void qwen3_asr_free_string(IntPtr ptr);
-
-    /// <summary>
-    /// Destroy an ASR instance.
-    /// </summary>
-    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern void qwen3_asr_destroy(IntPtr handle);
-
-    /// <summary>
-    /// Get the library version string.
-    /// </summary>
-    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    public static extern IntPtr qwen3_asr_version();
+    internal static extern IntPtr qwen3_asr_version();
 
     #endregion
 }

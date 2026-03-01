@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using Qwen3ASR.NET.Audio;
 using Qwen3ASR.NET.Enums;
 using Qwen3ASR.NET.Models;
 using Qwen3ASR.NET.Native;
@@ -44,8 +45,6 @@ public sealed class Qwen3Asr : IDisposable
     /// <param name="device">The device to use for inference. Default is CPU.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A new Qwen3Asr instance.</returns>
-    /// <exception cref="ArgumentNullException">Thrown when modelPath is null or empty.</exception>
-    /// <exception cref="Qwen3AsrException">Thrown when model loading fails.</exception>
     public static async Task<Qwen3Asr> FromPretrainedAsync(
         string modelPath,
         DeviceType device = DeviceType.Cpu,
@@ -66,8 +65,6 @@ public sealed class Qwen3Asr : IDisposable
     /// </summary>
     /// <param name="options">The load options.</param>
     /// <returns>A new Qwen3Asr instance.</returns>
-    /// <exception cref="ArgumentNullException">Thrown when options is null.</exception>
-    /// <exception cref="Qwen3AsrException">Thrown when model loading fails.</exception>
     public static Qwen3Asr Create(LoadOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -75,46 +72,38 @@ public sealed class Qwen3Asr : IDisposable
         if (string.IsNullOrEmpty(options.ModelPath))
             throw new ArgumentException("ModelPath is required", nameof(options));
 
-        var ffiOptions = new NativeBindings.LoadOptionsFFI
-        {
-            Device = options.Device,
-            ModelPath = StringToPtr(options.ModelPath),
-            Revision = StringToPtr(options.Revision),
-            NumThreads = options.NumThreads
-        };
+        var modelPathPtr = StringToPtr(options.ModelPath);
+        var deviceType = (NativeBindings.DeviceTypeFFI)options.Device;
 
         try
         {
-            var handle = NativeBindings.qwen3_asr_create(ref ffiOptions, out var errorMsg);
+            var handle = NativeBindings.qwen3_asr_load(modelPathPtr, deviceType, out var errorMsg);
 
             if (handle == IntPtr.Zero)
             {
                 var error = PtrToString(errorMsg);
                 NativeBindings.qwen3_asr_free_string(errorMsg);
-                throw new Qwen3AsrException($"Failed to create ASR instance: {error}");
+                throw new Qwen3AsrException($"Failed to load model: {error}");
             }
 
             return new Qwen3Asr(handle, options.ModelPath, options.Device);
         }
         finally
         {
-            FreeString(ffiOptions.ModelPath);
-            FreeString(ffiOptions.Revision);
+            FreeString(modelPathPtr);
         }
     }
 
     /// <summary>
-    /// Transcribes audio from a file.
+    /// Transcribes audio from a WAV file.
     /// </summary>
-    /// <param name="filePath">Path to the audio file.</param>
-    /// <param name="language">Optional language code (e.g., "Japanese", "English"). If null, auto-detects.</param>
+    /// <param name="filePath">Path to the WAV file.</param>
+    /// <param name="options">Transcription options. If null, default options are used.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The transcription result.</returns>
-    /// <exception cref="ObjectDisposedException">Thrown when this instance is disposed.</exception>
-    /// <exception cref="Qwen3AsrException">Thrown when transcription fails.</exception>
     public async Task<TranscriptionResult> TranscribeFileAsync(
         string filePath,
-        string? language = null,
+        TranscriptionOptions? options = null,
         CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -122,221 +111,160 @@ public sealed class Qwen3Asr : IDisposable
         if (string.IsNullOrEmpty(filePath))
             throw new ArgumentNullException(nameof(filePath));
 
+        // Use native file reading
         return await Task.Run(() =>
         {
             var filePathPtr = StringToPtr(filePath);
-            var languagePtr = StringToPtr(language);
+            var opts = BuildTranscribeOptions(options);
 
             try
             {
-                var result = NativeBindings.qwen3_asr_transcribe_file(_handle, filePathPtr, languagePtr);
+                var result = NativeBindings.qwen3_asr_transcribe_file(_handle, filePathPtr, ref opts);
                 return ProcessResult(result);
             }
             finally
             {
                 FreeString(filePathPtr);
-                FreeString(languagePtr);
+                FreeTranscribeOptions(ref opts);
             }
         }, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Transcribes audio from WAV bytes.
+    /// Transcribes audio samples (f32, mono).
     /// </summary>
-    /// <param name="wavBytes">Byte array containing WAV file data.</param>
-    /// <param name="language">Optional language code (e.g., "Japanese", "English"). If null, auto-detects.</param>
+    /// <param name="samples">Audio samples as 32-bit floats.</param>
+    /// <param name="sampleRate">Sample rate of the audio. Will be resampled to 16kHz if needed.</param>
+    /// <param name="options">Transcription options. If null, default options are used.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The transcription result.</returns>
-    /// <exception cref="ObjectDisposedException">Thrown when this instance is disposed.</exception>
-    /// <exception cref="Qwen3AsrException">Thrown when transcription fails.</exception>
-    public async Task<TranscriptionResult> TranscribeWavBytesAsync(
-        byte[] wavBytes,
-        string? language = null,
+    public async Task<TranscriptionResult> TranscribeAsync(
+        float[] samples,
+        int sampleRate = 16000,
+        TranscriptionOptions? options = null,
         CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        ArgumentNullException.ThrowIfNull(wavBytes);
+        ArgumentNullException.ThrowIfNull(samples);
 
         return await Task.Run(() =>
         {
-            var languagePtr = StringToPtr(language);
+            var opts = BuildTranscribeOptions(options);
 
             try
             {
-                var result = NativeBindings.qwen3_asr_transcribe_wav_bytes(
+                var result = NativeBindings.qwen3_asr_transcribe(
                     _handle,
-                    wavBytes,
-                    (UIntPtr)wavBytes.Length,
-                    languagePtr);
+                    samples,
+                    (UIntPtr)samples.Length,
+                    (uint)sampleRate,
+                    ref opts);
                 return ProcessResult(result);
             }
             finally
             {
-                FreeString(languagePtr);
+                FreeTranscribeOptions(ref opts);
             }
         }, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Transcribes 16-bit PCM audio bytes (mono, 16kHz).
-    /// </summary>
-    /// <param name="pcmBytes">16-bit PCM audio bytes (little-endian, mono, 16kHz).</param>
-    /// <param name="language">Optional language code (e.g., "Japanese", "English"). If null, auto-detects.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The transcription result.</returns>
-    /// <exception cref="ObjectDisposedException">Thrown when this instance is disposed.</exception>
-    /// <exception cref="Qwen3AsrException">Thrown when transcription fails.</exception>
-    /// <remarks>
-    /// This is a convenience method for the most common raw audio format.
-    /// The input should be 16-bit signed integer PCM data at 16kHz mono.
-    /// </remarks>
-    public async Task<TranscriptionResult> TranscribePcm16Async(
-        byte[] pcmBytes,
-        string? language = null,
-        CancellationToken cancellationToken = default)
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-
-        ArgumentNullException.ThrowIfNull(pcmBytes);
-
-        if (pcmBytes.Length % 2 != 0)
-            throw new ArgumentException("PCM byte count must be even (16-bit samples)", nameof(pcmBytes));
-
-        return await Task.Run(() =>
-        {
-            var languagePtr = StringToPtr(language);
-
-            try
-            {
-                var result = NativeBindings.qwen3_asr_transcribe_pcm16(
-                    _handle,
-                    pcmBytes,
-                    (UIntPtr)pcmBytes.Length,
-                    languagePtr);
-                return ProcessResult(result);
-            }
-            finally
-            {
-                FreeString(languagePtr);
-            }
-        }, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Transcribes raw audio bytes with format specification.
-    /// </summary>
-    /// <param name="audioBytes">Raw audio byte data.</param>
-    /// <param name="format">Audio format specification.</param>
-    /// <param name="language">Optional language code (e.g., "Japanese", "English"). If null, auto-detects.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The transcription result.</returns>
-    /// <exception cref="ObjectDisposedException">Thrown when this instance is disposed.</exception>
-    /// <exception cref="Qwen3AsrException">Thrown when transcription fails.</exception>
-    /// <remarks>
-    /// The audio will be automatically resampled to 16kHz and converted to mono if necessary.
-    /// </remarks>
-    public async Task<TranscriptionResult> TranscribeRawBytesAsync(
-        byte[] audioBytes,
-        AudioFormat format,
-        string? language = null,
-        CancellationToken cancellationToken = default)
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-
-        ArgumentNullException.ThrowIfNull(audioBytes);
-        ArgumentNullException.ThrowIfNull(format);
-
-        return await Task.Run(() =>
-        {
-            var languagePtr = StringToPtr(language);
-            var ffiFormat = new NativeBindings.AudioFormatFFI
-            {
-                SampleRate = format.SampleRate,
-                Channels = format.Channels,
-                BitsPerSample = format.BitsPerSample,
-                IsFloat = format.IsFloat
-            };
-
-            try
-            {
-                var result = NativeBindings.qwen3_asr_transcribe_raw_bytes(
-                    _handle,
-                    audioBytes,
-                    (UIntPtr)audioBytes.Length,
-                    ref ffiFormat,
-                    languagePtr);
-                return ProcessResult(result);
-            }
-            finally
-            {
-                FreeString(languagePtr);
-            }
-        }, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Transcribes audio from a Stream containing WAV data.
+    /// Transcribes audio from a stream containing WAV data.
     /// </summary>
     /// <param name="stream">Stream containing WAV file data.</param>
-    /// <param name="language">Optional language code (e.g., "Japanese", "English"). If null, auto-detects.</param>
+    /// <param name="options">Transcription options. If null, default options are used.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The transcription result.</returns>
-    /// <exception cref="ObjectDisposedException">Thrown when this instance is disposed.</exception>
-    /// <exception cref="Qwen3AsrException">Thrown when transcription fails.</exception>
-    public async Task<TranscriptionResult> TranscribeWavStreamAsync(
+    public async Task<TranscriptionResult> TranscribeAsync(
         Stream stream,
-        string? language = null,
+        TranscriptionOptions? options = null,
         CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         ArgumentNullException.ThrowIfNull(stream);
 
-        // Read stream to byte array
-        using var memoryStream = new MemoryStream();
-        await stream.CopyToAsync(memoryStream, cancellationToken).ConfigureAwait(false);
-        var wavBytes = memoryStream.ToArray();
-
-        return await TranscribeWavBytesAsync(wavBytes, language, cancellationToken).ConfigureAwait(false);
+        // Read and parse WAV in .NET (cross-platform)
+        var wavData = await Task.Run(() => WavReader.ReadWav(stream), cancellationToken).ConfigureAwait(false);
+        return await TranscribeAsync(wavData.Samples, (int)wavData.SampleRate, options, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Transcribes audio samples.
+    /// Transcribes multiple audio files in batch.
     /// </summary>
-    /// <param name="audioSamples">Audio samples as 32-bit floats (16kHz, mono).</param>
-    /// <param name="language">Optional language code (e.g., "Japanese", "English"). If null, auto-detects.</param>
+    /// <param name="filePaths">Paths to the audio files.</param>
+    /// <param name="options">Transcription options. If null, default options are used.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The transcription result.</returns>
-    /// <exception cref="ObjectDisposedException">Thrown when this instance is disposed.</exception>
-    /// <exception cref="Qwen3AsrException">Thrown when transcription fails.</exception>
-    public async Task<TranscriptionResult> TranscribeAsync(
-        float[] audioSamples,
-        string? language = null,
+    /// <returns>List of transcription results.</returns>
+    public async Task<List<TranscriptionResult>> TranscribeBatchAsync(
+        IEnumerable<string> filePaths,
+        TranscriptionOptions? options = null,
         CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        ArgumentNullException.ThrowIfNull(audioSamples);
+        ArgumentNullException.ThrowIfNull(filePaths);
 
-        return await Task.Run(() =>
+        var results = new List<TranscriptionResult>();
+
+        foreach (var filePath in filePaths)
         {
-            var languagePtr = StringToPtr(language);
+            cancellationToken.ThrowIfCancellationRequested();
+            var result = await TranscribeFileAsync(filePath, options, cancellationToken).ConfigureAwait(false);
+            results.Add(result);
+        }
 
-            try
-            {
-                var result = NativeBindings.qwen3_asr_transcribe(
-                    _handle,
-                    audioSamples,
-                    (UIntPtr)audioSamples.Length,
-                    languagePtr);
-                return ProcessResult(result);
-            }
-            finally
-            {
-                FreeString(languagePtr);
-            }
-        }, cancellationToken).ConfigureAwait(false);
+        return results;
+    }
+
+    /// <summary>
+    /// Transcribes multiple audio samples in batch.
+    /// </summary>
+    /// <param name="samplesList">List of audio samples (each as 32-bit floats at 16kHz mono).</param>
+    /// <param name="options">Transcription options. If null, default options are used.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>List of transcription results.</returns>
+    public async Task<List<TranscriptionResult>> TranscribeBatchAsync(
+        IEnumerable<float[]> samplesList,
+        TranscriptionOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        ArgumentNullException.ThrowIfNull(samplesList);
+
+        var results = new List<TranscriptionResult>();
+
+        foreach (var samples in samplesList)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var result = await TranscribeAsync(samples, 16000, options, cancellationToken).ConfigureAwait(false);
+            results.Add(result);
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Transcribes audio from byte array containing WAV data.
+    /// </summary>
+    /// <param name="wavBytes">Byte array containing WAV file data.</param>
+    /// <param name="options">Transcription options. If null, default options are used.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The transcription result.</returns>
+    public async Task<TranscriptionResult> TranscribeWavBytesAsync(
+        byte[] wavBytes,
+        TranscriptionOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        ArgumentNullException.ThrowIfNull(wavBytes);
+
+        // Parse WAV in .NET (cross-platform)
+        var wavData = await Task.Run(() => WavReader.ReadWav(wavBytes), cancellationToken).ConfigureAwait(false);
+        return await TranscribeAsync(wavData.Samples, (int)wavData.SampleRate, options, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -344,43 +272,129 @@ public sealed class Qwen3Asr : IDisposable
     /// </summary>
     /// <param name="options">Stream options. If null, default options are used.</param>
     /// <returns>A new streaming transcriber.</returns>
-    /// <exception cref="ObjectDisposedException">Thrown when this instance is disposed.</exception>
-    /// <exception cref="Qwen3AsrException">Thrown when starting the stream fails.</exception>
     public StreamingTranscriber StartStream(StreamOptions? options = null)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        options ??= new StreamOptions();
+        options ??= StreamOptions.Default;
+        return new StreamingTranscriber(this, options);
+    }
 
-        var ffiOptions = new NativeBindings.StreamOptionsFFI
+    /// <summary>
+    /// Transcribes an audio file with streaming callbacks.
+    /// This allows processing large files with partial results.
+    /// </summary>
+    /// <param name="filePath">Path to the audio file (WAV format supported).</param>
+    /// <param name="onPartialResult">Callback for partial transcription results.</param>
+    /// <param name="options">Stream options. If null, default options are used.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The final transcription result.</returns>
+    public async Task<TranscriptionResult> TranscribeFileStreamAsync(
+        string filePath,
+        Action<TranscriptionResult>? onPartialResult = null,
+        StreamOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (string.IsNullOrEmpty(filePath))
+            throw new ArgumentNullException(nameof(filePath));
+
+        var wavData = await Task.Run(() => WavReader.ReadWav(filePath), cancellationToken).ConfigureAwait(false);
+        return await TranscribeSamplesStreamAsync(wavData.Samples, onPartialResult, options, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Transcribes audio samples with streaming callbacks.
+    /// This allows processing large audio with partial results.
+    /// </summary>
+    /// <param name="samples">Audio samples as 32-bit floats (16kHz, mono).</param>
+    /// <param name="onPartialResult">Callback for partial transcription results.</param>
+    /// <param name="options">Stream options. If null, default options are used.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The final transcription result.</returns>
+    public async Task<TranscriptionResult> TranscribeSamplesStreamAsync(
+        float[] samples,
+        Action<TranscriptionResult>? onPartialResult = null,
+        StreamOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        ArgumentNullException.ThrowIfNull(samples);
+
+        options ??= StreamOptions.Default;
+
+        using var stream = StartStream(options);
+        var chunkSizeSamples = (int)(options.ChunkSizeSec * 16000);
+
+        for (int i = 0; i < samples.Length; i += chunkSizeSamples)
         {
-            Language = StringToPtr(options.Language),
-            ChunkSizeSec = options.ChunkSizeSec,
-            EnableTimestamps = options.EnableTimestamps,
-            EnablePartialResults = options.EnablePartialResults
-        };
+            cancellationToken.ThrowIfCancellationRequested();
 
-        try
+            int remaining = Math.Min(chunkSizeSamples, samples.Length - i);
+            var chunk = new float[remaining];
+            Array.Copy(samples, i, chunk, 0, remaining);
+
+            var partialResult = await stream.PushAsync(chunk, cancellationToken).ConfigureAwait(false);
+            onPartialResult?.Invoke(partialResult);
+        }
+
+        return await stream.FinishAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Transcribes audio from a stream with streaming callbacks.
+    /// </summary>
+    /// <param name="stream">Stream containing WAV data.</param>
+    /// <param name="onPartialResult">Callback for partial transcription results.</param>
+    /// <param name="options">Stream options. If null, default options are used.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The final transcription result.</returns>
+    public async Task<TranscriptionResult> TranscribeStreamAsync(
+        Stream stream,
+        Action<TranscriptionResult>? onPartialResult = null,
+        StreamOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        ArgumentNullException.ThrowIfNull(stream);
+
+        var wavData = await Task.Run(() => WavReader.ReadWav(stream), cancellationToken).ConfigureAwait(false);
+        return await TranscribeSamplesStreamAsync(wavData.Samples, onPartialResult, options, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Gets the supported languages as an array.
+    /// </summary>
+    public async Task<string[]> GetSupportedLanguagesAsync(CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        return await Task.Run(() =>
         {
-            var streamHandle = NativeBindings.qwen3_asr_stream_start(_handle, ref ffiOptions);
+            var jsonPtr = NativeBindings.qwen3_asr_supported_languages(_handle);
+            var json = PtrToString(jsonPtr);
+            NativeBindings.qwen3_asr_free_string(jsonPtr);
 
-            if (streamHandle == IntPtr.Zero)
+            if (string.IsNullOrEmpty(json))
+                return Array.Empty<string>();
+
+            try
             {
-                throw new Qwen3AsrException("Failed to start streaming transcription");
+                return JsonSerializer.Deserialize<string[]>(json) ?? Array.Empty<string>();
             }
-
-            return new StreamingTranscriber(streamHandle, options);
-        }
-        finally
-        {
-            FreeString(ffiOptions.Language);
-        }
+            catch
+            {
+                return Array.Empty<string>();
+            }
+        }, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
     /// Gets the library version.
     /// </summary>
-    /// <returns>The version string.</returns>
     public static string GetVersion()
     {
         var versionPtr = NativeBindings.qwen3_asr_version();
@@ -389,42 +403,94 @@ public sealed class Qwen3Asr : IDisposable
         return version ?? "unknown";
     }
 
+    // Internal method for streaming transcription
+    internal TranscriptionResult TranscribeInternal(float[] samples, TranscriptionOptions? options = null)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        var opts = BuildTranscribeOptions(options);
+
+        try
+        {
+            var result = NativeBindings.qwen3_asr_transcribe(
+                _handle,
+                samples,
+                (UIntPtr)samples.Length,
+                16000,
+                ref opts);
+            return ProcessResult(result);
+        }
+        finally
+        {
+            FreeTranscribeOptions(ref opts);
+        }
+    }
+
+    private static NativeBindings.TranscribeOptionsFFI BuildTranscribeOptions(TranscriptionOptions? options)
+    {
+        options ??= TranscriptionOptions.Default;
+
+        return new NativeBindings.TranscribeOptionsFFI
+        {
+            Context = StringToPtr(options.Context),
+            Language = StringToPtr(options.Language.ToNativeString()),
+            ReturnTimestamps = options.ReturnTimestamps,
+            MaxNewTokens = options.MaxNewTokens,
+            MaxBatchSize = options.MaxBatchSize,
+            ChunkMaxSec = options.ChunkMaxSec ?? 0f,
+            BucketByLength = options.BucketByLength
+        };
+    }
+
+    private static void FreeTranscribeOptions(ref NativeBindings.TranscribeOptionsFFI opts)
+    {
+        FreeString(opts.Context);
+        FreeString(opts.Language);
+    }
+
     private static TranscriptionResult ProcessResult(NativeBindings.TranscriptionResultFFI ffiResult)
     {
         try
         {
             if (ffiResult.Code != NativeBindings.ResultCode.Success)
             {
-                var error = PtrToString(ffiResult.ErrorMessage) ?? "Unknown error";
-                throw new Qwen3AsrException(error, ffiResult.Code.ToErrorCode());
+                var error = PtrToString(ffiResult.Error) ?? "Unknown error";
+                throw new Qwen3AsrException(error, ToErrorCode(ffiResult.Code));
             }
 
-            var text = PtrToString(ffiResult.Text) ?? string.Empty;
-            var jsonResult = PtrToString(ffiResult.JsonResult);
-
-            if (!string.IsNullOrEmpty(jsonResult))
+            var json = PtrToString(ffiResult.Json);
+            if (!string.IsNullOrEmpty(json))
             {
                 try
                 {
-                    var result = JsonSerializer.Deserialize<TranscriptionResult>(jsonResult);
+                    var result = JsonSerializer.Deserialize<TranscriptionResult>(json);
                     if (result != null)
-                    {
                         return result;
-                    }
                 }
                 catch (JsonException)
                 {
-                    // Fall through to basic result
+                    // Fall through
                 }
             }
 
-            return new TranscriptionResult { Text = text };
+            return new TranscriptionResult { Text = string.Empty };
         }
         finally
         {
             NativeBindings.qwen3_asr_free_result(ref ffiResult);
         }
     }
+
+    private static ErrorCode ToErrorCode(NativeBindings.ResultCode code) => code switch
+    {
+        NativeBindings.ResultCode.Success => ErrorCode.Success,
+        NativeBindings.ResultCode.InvalidHandle => ErrorCode.InvalidHandle,
+        NativeBindings.ResultCode.InvalidParameter => ErrorCode.InvalidParameter,
+        NativeBindings.ResultCode.ModelNotLoaded => ErrorCode.ModelNotLoaded,
+        NativeBindings.ResultCode.InferenceError => ErrorCode.InferenceError,
+        NativeBindings.ResultCode.MemoryError => ErrorCode.MemoryError,
+        _ => ErrorCode.UnknownError
+    };
 
     private static IntPtr StringToPtr(string? str)
     {
@@ -449,7 +515,7 @@ public sealed class Qwen3Asr : IDisposable
     }
 
     /// <summary>
-    /// Disposes this instance and releases all resources.
+    /// Releases all resources used by the Qwen3Asr instance.
     /// </summary>
     public void Dispose()
     {
@@ -467,7 +533,7 @@ public sealed class Qwen3Asr : IDisposable
     }
 
     /// <summary>
-    /// Finalizer.
+    /// Finalizer to ensure unmanaged resources are released.
     /// </summary>
     ~Qwen3Asr()
     {
