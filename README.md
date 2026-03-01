@@ -1,9 +1,9 @@
 # Qwen3ASR.NET
 
 [![NuGet](https://img.shields.io/nuget/v/Qwen3ASR.NET.svg)](https://www.nuget.org/packages/Qwen3ASR.NET/)
-[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**Qwen3ASR.NET** is a .NET wrapper for [Qwen3-ASR](https://github.com/lumosimmo/qwen3-asr-rs), Alibaba's state-of-the-art speech recognition implementation in Rust.
+**Qwen3ASR.NET** is a .NET wrapper for [qwen3-asr-rs](https://github.com/lumosimmo/qwen3-asr-rs), a Rust/Candle implementation of [Qwen3-Audio](https://github.com/QwenLM/Qwen3-Audio) (Alibaba's state-of-the-art speech recognition model).
 
 ## Features
 
@@ -41,6 +41,7 @@ Available runtime packages:
 ```csharp
 using Qwen3ASR.NET;
 using Qwen3ASR.NET.Enums;
+using Qwen3ASR.NET.Models;
 
 // Load model (first run will download from HuggingFace)
 using var asr = await Qwen3Asr.FromPretrainedAsync(
@@ -49,13 +50,24 @@ using var asr = await Qwen3Asr.FromPretrainedAsync(
 );
 
 // Transcribe audio file
-var result = await asr.TranscribeFileAsync("audio.wav", language: "Japanese");
+var result = await asr.TranscribeFileAsync("audio.wav", new TranscriptionOptions
+{
+    Language = Language.Japanese
+});
 Console.WriteLine(result.Text);
 
 // Transcribe raw audio samples (16kHz mono f32)
 float[] samples = LoadAudioSamples(); // Your audio loading code
-var result2 = await asr.TranscribeAsync(samples, language: "Japanese");
+var result2 = await asr.TranscribeAsync(samples, 16000, new TranscriptionOptions
+{
+    Language = Language.Japanese
+});
 Console.WriteLine(result2.Text);
+
+// Transcribe from WAV bytes
+byte[] wavBytes = File.ReadAllBytes("audio.wav");
+var result3 = await asr.TranscribeWavBytesAsync(wavBytes);
+Console.WriteLine(result3.Text);
 ```
 
 ### Streaming Transcription
@@ -66,10 +78,10 @@ using var asr = await Qwen3Asr.FromPretrainedAsync("Qwen/Qwen3-ASR-0.6B");
 // Start streaming session
 await using var stream = asr.StartStream(new StreamOptions
 {
-    Language = "Japanese",
-    ChunkSizeSec = 0.5f,
-    EnableTimestamps = true,
-    EnablePartialResults = true
+    Language = Language.Japanese,
+    ChunkSizeSec = 2.0f,
+    UnfixedChunkNum = 2,
+    MaxNewTokens = 256
 });
 
 // Push audio chunks as they arrive
@@ -79,9 +91,43 @@ foreach (var chunk in audioChunks)
     Console.WriteLine($"Partial: {partial.Text}");
 }
 
-// Get final result
+// Get final result with timestamps
 var final = await stream.FinishAsync();
 Console.WriteLine($"Final: {final.Text}");
+```
+
+### Streaming from File
+
+```csharp
+using var asr = await Qwen3Asr.FromPretrainedAsync("Qwen/Qwen3-ASR-0.6B");
+
+// Stream process a large file with partial results
+var result = await asr.TranscribeFileStreamAsync(
+    "large_audio.wav",
+    onPartialResult: partial => Console.WriteLine($"Partial: {partial.Text}"),
+    new StreamOptions { Language = Language.Japanese }
+);
+
+Console.WriteLine($"Final: {result.Text}");
+```
+
+### Batch Processing
+
+```csharp
+using var asr = await Qwen3Asr.FromPretrainedAsync("Qwen/Qwen3-ASR-0.6B");
+
+// Process multiple files
+var files = new[] { "audio1.wav", "audio2.wav", "audio3.wav" };
+var results = await asr.TranscribeBatchAsync(files, new TranscriptionOptions
+{
+    Language = Language.Japanese,
+    ReturnTimestamps = true
+});
+
+foreach (var result in results)
+{
+    Console.WriteLine(result.Text);
+}
 ```
 
 ### GPU Acceleration
@@ -109,24 +155,59 @@ Main class for speech recognition.
 | Method | Description |
 |--------|-------------|
 | `FromPretrainedAsync(modelPath, device)` | Load a pretrained model |
-| `TranscribeFileAsync(filePath, language)` | Transcribe an audio file |
-| `TranscribeAsync(samples, language)` | Transcribe audio samples |
+| `TranscribeFileAsync(filePath, options)` | Transcribe an audio file |
+| `TranscribeAsync(samples, sampleRate, options)` | Transcribe audio samples |
+| `TranscribeAsync(stream, options)` | Transcribe from WAV stream |
+| `TranscribeWavBytesAsync(wavBytes, options)` | Transcribe from WAV bytes |
+| `TranscribeFileStreamAsync(filePath, onPartialResult, options)` | Stream process a file |
+| `TranscribeSamplesStreamAsync(samples, onPartialResult, options)` | Stream process samples |
+| `TranscribeBatchAsync(filePaths, options)` | Process multiple files |
 | `StartStream(options)` | Start streaming transcription |
+| `GetSupportedLanguagesAsync()` | Get supported languages |
 | `GetVersion()` | Get library version |
 
 ### `StreamingTranscriber`
 
-Real-time transcription session.
+Real-time transcription session with rolling context support.
 
 | Method | Description |
 |--------|-------------|
-| `PushAsync(samples)` | Push audio samples |
+| `PushAsync(samples)` | Push audio samples (16kHz mono f32) |
 | `GetPartialResult()` | Get current partial result |
 | `FinishAsync()` | Finish and get final result |
 
-### `TranscriptionResult`
+| Property | Type | Description |
+|----------|------|-------------|
+| `IsActive` | `bool` | Whether stream is still active |
+| `SegmentCount` | `int` | Number of segments processed |
+| `Duration` | `float` | Total duration processed (seconds) |
 
-Transcription output.
+### `TranscriptionOptions`
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `Language` | `Language` | `Auto` | Language for transcription |
+| `Context` | `string?` | `null` | Context string for accuracy |
+| `ReturnTimestamps` | `bool` | `false` | Return word timestamps |
+| `MaxNewTokens` | `int` | `0` | Max tokens (0 = default) |
+| `MaxBatchSize` | `int` | `32` | Batch size for processing |
+| `ChunkMaxSec` | `float?` | `null` | Max chunk duration |
+| `BucketByLength` | `bool` | `false` | Bucket audio by length |
+
+### `StreamOptions`
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `Language` | `Language` | `Auto` | Language for transcription |
+| `Context` | `string?` | `null` | Initial context string |
+| `ChunkSizeSec` | `float` | `2.0` | Chunk size in seconds |
+| `UnfixedChunkNum` | `int` | `2` | Unfixed chunk count |
+| `UnfixedTokenNum` | `int` | `5` | Unfixed token count |
+| `MaxNewTokens` | `int` | `256` | Max new tokens |
+| `AudioWindowSec` | `float?` | `null` | Rolling audio window |
+| `TextWindowTokens` | `int?` | `null` | Rolling text window |
+
+### `TranscriptionResult`
 
 | Property | Type | Description |
 |----------|------|-------------|
@@ -134,6 +215,17 @@ Transcription output.
 | `Language` | `string?` | Detected/used language |
 | `Confidence` | `float?` | Confidence score |
 | `Timestamps` | `List<Timestamp>?` | Word/segment timestamps |
+| `IsPartial` | `bool` | Whether this is a partial result |
+
+### `Language` Enum
+
+Supported languages: `Auto`, `Japanese`, `English`, `Chinese`, `Korean`, `French`, `German`, `Spanish`, `Russian`, `Portuguese`, `Italian`, `Dutch`, `Arabic`, `Hindi`, `Thai`, `Vietnamese`, `Indonesian`, `Turkish`, `Polish`, `Swedish`, `Czech`
+
+### `DeviceType` Enum
+
+- `Cpu` - CPU inference (most compatible)
+- `Cuda` - NVIDIA GPU with CUDA
+- `Metal` - macOS Apple Silicon/AMD
 
 ## Requirements
 
@@ -206,50 +298,22 @@ The native Rust library (`qwen3_asr_ffi`) is automatically built when building t
 
 ## License
 
-Licensed under either of
-
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
-- MIT license ([LICENSE-MIT](LICENSE-MIT))
-
-at your option.
+Licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Dependencies
-
-### Core Dependencies
 
 | Library | Version | License | Description |
 |---------|---------|---------|-------------|
 | [qwen3-asr-rs](https://github.com/lumosimmo/qwen3-asr-rs) | main | MIT/Apache-2.0 | Qwen3-ASR Rust/Candle implementation |
 | [candle-core](https://github.com/huggingface/candle) | 0.9 | MIT/Apache-2.0 | ML framework for Rust (Hugging Face) |
-| [candle-nn](https://github.com/huggingface/candle) | 0.9 | MIT/Apache-2.0 | Neural network layers for Candle |
-| [candle-transformers](https://github.com/huggingface/candle) | 0.9 | MIT/Apache-2.0 | Transformer models for Candle |
-
-### Audio Processing
-
-| Library | Version | License | Description |
-|---------|---------|---------|-------------|
 | [hound](https://github.com/ruuda/hound) | 3.5 | MIT/Apache-2.0 | WAV audio file reader/writer |
-
-### FFI & Utilities
-
-| Library | Version | License | Description |
-|---------|---------|---------|-------------|
-| [libc](https://github.com/rust-lang/libc) | 0.2 | MIT/Apache-2.0 | FFI bindings to system libraries |
-| [thiserror](https://github.com/dtolnay/thiserror) | 1.0 | MIT/Apache-2.0 | Error handling derive macro |
-| [anyhow](https://github.com/dtolnay/anyhow) | 1.0 | MIT/Apache-2.0 | Flexible error handling |
 | [serde](https://github.com/serde-rs/serde) | 1.0 | MIT/Apache-2.0 | Serialization framework |
 | [serde_json](https://github.com/serde-rs/json) | 1.0 | MIT/Apache-2.0 | JSON support for Serde |
+| [anyhow](https://github.com/dtolnay/anyhow) | 1.0 | MIT/Apache-2.0 | Flexible error handling |
+| [thiserror](https://github.com/dtolnay/thiserror) | 1.0 | MIT/Apache-2.0 | Error handling derive macro |
+| [libc](https://github.com/rust-lang/libc) | 0.2 | MIT/Apache-2.0 | FFI bindings to system libraries |
 | [log](https://github.com/rust-lang/log) | 0.4 | MIT/Apache-2.0 | Logging facade |
 | [num_cpus](https://github.com/seanmonstar/num_cpus) | 1.16 | MIT/Apache-2.0 | CPU count detection |
-
-### Transitive Dependencies (via qwen3-asr-rs)
-
-| Library | License | Description |
-|---------|---------|-------------|
-| [tokenizers](https://github.com/huggingface/tokenizers) | Apache-2.0 | Fast tokenization library (Hugging Face) |
-| [safetensors](https://github.com/huggingface/safetensors) | Apache-2.0 | Safe tensor serialization |
-| [hf-hub](https://github.com/huggingface/hf-hub) | Apache-2.0 | Hugging Face Hub API client |
-| [ureq](https://github.com/algesten/ureq) | MIT/Apache-2.0 | HTTP client for model downloads |
 
 ## Acknowledgments
 
