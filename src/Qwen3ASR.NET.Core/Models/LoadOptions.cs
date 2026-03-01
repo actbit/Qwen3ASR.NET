@@ -17,7 +17,7 @@ public class LoadOptions
     /// Gets or sets the path to the model directory or HuggingFace model ID.
     /// Example: "Qwen/Qwen3-ASR-0.6B"
     /// </summary>
-    public required string ModelPath { get; set; }
+    public string ModelPath { get; set; } = string.Empty;
 
     /// <summary>
     /// Gets or sets the specific revision/branch for HuggingFace models.
@@ -30,18 +30,4 @@ public class LoadOptions
     /// Set to 0 for automatic detection (recommended).
     /// </summary>
     public int NumThreads { get; set; } = 0;
-
-    /// <summary>
-    /// Creates a new instance of LoadOptions with default values.
-    /// </summary>
-    public LoadOptions() { }
-
-    /// <summary>
-    /// Creates a new instance of LoadOptions with the specified model path.
-    /// </summary>
-    /// <param name="modelPath">The model path or HuggingFace model ID.</param>
-    public LoadOptions(string modelPath)
-    {
-        ModelPath = modelPath;
-    }
 }

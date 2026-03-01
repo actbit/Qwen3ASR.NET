@@ -1,5 +1,6 @@
 using Qwen3ASR.NET.Enums;
 using Qwen3ASR.NET.Models;
+using Xunit;
 
 namespace Qwen3ASR.NET.Tests;
 
@@ -22,7 +23,7 @@ public class Qwen3AsrTests
     [Fact]
     public void LoadOptions_WithModelPath_SetsModelPath()
     {
-        var options = new LoadOptions("Qwen/Qwen3-ASR-0.6B");
+        var options = new LoadOptions { ModelPath = "Qwen/Qwen3-ASR-0.6B" };
 
         Assert.Equal("Qwen/Qwen3-ASR-0.6B", options.ModelPath);
     }

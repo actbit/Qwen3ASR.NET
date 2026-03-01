@@ -109,7 +109,7 @@ public sealed class StreamingTranscriber : IAsyncDisposable, IDisposable
             if (ffiResult.Code != NativeBindings.ResultCode.Success)
             {
                 var error = PtrToString(ffiResult.ErrorMessage) ?? "Unknown error";
-                throw new Qwen3AsrException(error, ffiResult.Code);
+                throw new Qwen3AsrException(error, ffiResult.Code.ToErrorCode());
             }
 
             var text = PtrToString(ffiResult.Text) ?? string.Empty;

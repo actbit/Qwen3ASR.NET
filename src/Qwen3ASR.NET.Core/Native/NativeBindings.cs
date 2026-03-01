@@ -13,9 +13,9 @@ internal static class NativeBindings
     #region FFI Structures
 
     /// <summary>
-    /// Result codes for FFI functions.
+    /// Result codes for FFI functions (internal).
     /// </summary>
-    public enum ResultCode
+    internal enum ResultCode
     {
         Success = 0,
         InvalidHandle = 1,
@@ -26,6 +26,21 @@ internal static class NativeBindings
         StreamError = 6,
         UnknownError = 99
     }
+
+    /// <summary>
+    /// Converts FFI ResultCode to public ErrorCode.
+    /// </summary>
+    public static ErrorCode ToErrorCode(this ResultCode code) => code switch
+    {
+        ResultCode.Success => ErrorCode.Success,
+        ResultCode.InvalidHandle => ErrorCode.InvalidHandle,
+        ResultCode.InvalidParameter => ErrorCode.InvalidParameter,
+        ResultCode.ModelNotLoaded => ErrorCode.ModelNotLoaded,
+        ResultCode.InferenceError => ErrorCode.InferenceError,
+        ResultCode.MemoryError => ErrorCode.MemoryError,
+        ResultCode.StreamError => ErrorCode.StreamError,
+        _ => ErrorCode.UnknownError
+    };
 
     /// <summary>
     /// Options for loading a model (FFI representation).

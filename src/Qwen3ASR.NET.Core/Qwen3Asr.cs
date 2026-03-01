@@ -56,7 +56,7 @@ public sealed class Qwen3Asr : IDisposable
 
         return await Task.Run(() =>
         {
-            var options = new LoadOptions(modelPath) { Device = device };
+            var options = new LoadOptions { ModelPath = modelPath, Device = device };
             return Create(options);
         }, cancellationToken).ConfigureAwait(false);
     }
@@ -235,7 +235,7 @@ public sealed class Qwen3Asr : IDisposable
             if (ffiResult.Code != NativeBindings.ResultCode.Success)
             {
                 var error = PtrToString(ffiResult.ErrorMessage) ?? "Unknown error";
-                throw new Qwen3AsrException(error, ffiResult.Code);
+                throw new Qwen3AsrException(error, ffiResult.Code.ToErrorCode());
             }
 
             var text = PtrToString(ffiResult.Text) ?? string.Empty;

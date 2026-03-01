@@ -27,13 +27,13 @@
     <None Include="..\..\README.md" Pack="true" PackagePath="" Condition="Exists('..\..\README.md')" />
   </ItemGroup>
 
-  <!-- Dependencies on all components -->
+  <!-- Project references for build (converted to package references during pack) -->
   <ItemGroup>
-    <PackageReference Include="Qwen3ASR.NET.Core" Version="$(Version)" />
-    <PackageReference Include="Qwen3ASR.NET.Runtime.Win-x64" Version="$(Version)" />
-    <PackageReference Include="Qwen3ASR.NET.Runtime.Linux-x64" Version="$(Version)" />
-    <PackageReference Include="Qwen3ASR.NET.Runtime.OSX-x64" Version="$(Version)" />
-    <PackageReference Include="Qwen3ASR.NET.Runtime.OSX-arm64" Version="$(Version)" />
+    <ProjectReference Include="..\Qwen3ASR.NET.Core\Qwen3ASR.NET.Core.csproj" />
+    <ProjectReference Include="..\Qwen3ASR.NET.Runtime.Win-x64\Qwen3ASR.NET.Runtime.Win-x64.csproj" />
+    <ProjectReference Include="..\Qwen3ASR.NET.Runtime.Linux-x64\Qwen3ASR.NET.Runtime.Linux-x64.csproj" />
+    <ProjectReference Include="..\Qwen3ASR.NET.Runtime.OSX-x64\Qwen3ASR.NET.Runtime.OSX-x64.csproj" />
+    <ProjectReference Include="..\Qwen3ASR.NET.Runtime.OSX-arm64\Qwen3ASR.NET.Runtime.OSX-arm64.csproj" />
   </ItemGroup>
 
 </Project>
