@@ -23,6 +23,7 @@ candle-core = "0.4"
 # FFI utilities
 libc = "0.2"
 thiserror = "1.0"
+anyhow = "1.0"
 
 # Serialization for JSON results
 serde = { version = "1.0", features = ["derive"] }
@@ -34,6 +35,9 @@ env_logger = { version = "0.11", optional = true }
 
 # Audio file loading
 hound = "3.5"
+
+# CPU detection
+num_cpus = "1.16"
 
 [features]
 default = []
