@@ -1,0 +1,215 @@
+name: Build and Publish
+
+on:
+  push:
+    branches: [ main, develop ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  DOTNET_VERSION: '8.0.x'
+  RUST_VERSION: '1.75'
+
+jobs:
+  # Build .NET managed library
+  build-dotnet:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test --configuration Release --no-build --verbosity normal
+
+  # Build Rust FFI library for multiple platforms
+  build-rust:
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            artifact: win-x64
+            ext: dll
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact: linux-x64
+            ext: so
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            artifact: osx-x64
+            ext: dylib
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            artifact: osx-arm64
+            ext: dylib
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-${{ matrix.target }}-
+            ${{ runner.os }}-cargo-
+
+      - name: Build Rust library
+        run: |
+          cd qwen3_asr_ffi
+          cargo build --release --target ${{ matrix.target }}
+
+      - name: Prepare artifact (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          mkdir -p artifacts/runtimes/${{ matrix.artifact }}/native
+          cp target/${{ matrix.target }}/release/qwen3_asr_ffi.${{ matrix.ext }} artifacts/runtimes/${{ matrix.artifact }}/native/
+        shell: bash
+
+      - name: Prepare artifact (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          mkdir -p artifacts/runtimes/${{ matrix.artifact }}/native
+          cp target/${{ matrix.target }}/release/libqwen3_asr_ffi.${{ matrix.ext }} artifacts/runtimes/${{ matrix.artifact }}/native/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.artifact }}
+          path: artifacts/
+
+  # Package NuGet packages
+  package:
+    needs: [build-dotnet, build-rust]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare runtime packages
+        run: |
+          # Copy native libraries to runtime package directories
+          cp -r artifacts/native-win-x64/runtimes/* src/Qwen3ASR.NET.Runtime.Win-x64/
+          cp -r artifacts/native-linux-x64/runtimes/* src/Qwen3ASR.NET.Runtime.Linux-x64/
+          cp -r artifacts/native-osx-x64/runtimes/* src/Qwen3ASR.NET.Runtime.OSX-x64/
+          cp -r artifacts/native-osx-arm64/runtimes/* src/Qwen3ASR.NET.Runtime.OSX-arm64/
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Pack NuGet packages
+        run: |
+          dotnet pack src/Qwen3ASR.NET.Core/Qwen3ASR.NET.Core.csproj \
+            --configuration Release \
+            --output ./nupkg \
+            -p:Version=${{ steps.version.outputs.VERSION }}
+
+          dotnet pack src/Qwen3ASR.NET.Runtime.Win-x64/Qwen3ASR.NET.Runtime.Win-x64.csproj \
+            --configuration Release \
+            --output ./nupkg \
+            -p:Version=${{ steps.version.outputs.VERSION }}
+
+          dotnet pack src/Qwen3ASR.NET.Runtime.Linux-x64/Qwen3ASR.NET.Runtime.Linux-x64.csproj \
+            --configuration Release \
+            --output ./nupkg \
+            -p:Version=${{ steps.version.outputs.VERSION }}
+
+          dotnet pack src/Qwen3ASR.NET.Runtime.OSX-x64/Qwen3ASR.NET.Runtime.OSX-x64.csproj \
+            --configuration Release \
+            --output ./nupkg \
+            -p:Version=${{ steps.version.outputs.VERSION }}
+
+          dotnet pack src/Qwen3ASR.NET.Runtime.OSX-arm64/Qwen3ASR.NET.Runtime.OSX-arm64.csproj \
+            --configuration Release \
+            --output ./nupkg \
+            -p:Version=${{ steps.version.outputs.VERSION }}
+
+          dotnet pack src/Qwen3ASR.NET/Qwen3ASR.NET.csproj \
+            --configuration Release \
+            --output ./nupkg \
+            -p:Version=${{ steps.version.outputs.VERSION }}
+
+      - name: Publish to NuGet
+        run: |
+          dotnet nuget push ./nupkg/*.nupkg \
+            --source https://api.nuget.org/v3/index.json \
+            --api-key ${{ secrets.NUGET_API_KEY }} \
+            --skip-duplicate
+
+      - name: Upload packages as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages
+          path: ./nupkg/*.nupkg
+
+  # Create GitHub Release
+  release:
+    needs: [package]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download NuGet packages
+        uses: actions/download-artifact@v4
+        with:
+          name: nuget-packages
+          path: ./nupkg
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ./nupkg/*.nupkg
+          generate_release_notes: true
+          body: |
+            ## Qwen3ASR.NET ${{ github.ref_name }}
+
+            ### Installation
+
+            ```xml
+            <!-- All platforms (meta package) -->
+            <PackageReference Include="Qwen3ASR.NET" Version="${{ github.ref_name }}" />
+
+            <!-- Or platform-specific -->
+            <PackageReference Include="Qwen3ASR.NET.Core" Version="${{ github.ref_name }}" />
+            <PackageReference Include="Qwen3ASR.NET.Runtime.Win-x64" Version="${{ github.ref_name }}" />
+            ```
+
+            ### Changes
+            See the changelog for details.
