@@ -1,19 +1,11 @@
 <Solution>
-  <!-- Core managed library -->
-  <Project Path="src\Qwen3ASR.NET.Core\Qwen3ASR.NET.Core.csproj" />
-
-  <!-- Meta package -->
-  <Project Path="src\Qwen3ASR.NET\Qwen3ASR.NET.csproj" />
-
-  <!-- Runtime packages -->
-  <Project Path="src\Qwen3ASR.NET.Runtime.Win-x64\Qwen3ASR.NET.Runtime.Win-x64.csproj" />
-  <Project Path="src\Qwen3ASR.NET.Runtime.Linux-x64\Qwen3ASR.NET.Runtime.Linux-x64.csproj" />
-  <Project Path="src\Qwen3ASR.NET.Runtime.OSX-x64\Qwen3ASR.NET.Runtime.OSX-x64.csproj" />
-  <Project Path="src\Qwen3ASR.NET.Runtime.OSX-arm64\Qwen3ASR.NET.Runtime.OSX-arm64.csproj" />
-
-  <!-- Tests -->
-  <Project Path="tests\Qwen3ASR.NET.Tests\Qwen3ASR.NET.Tests.csproj" />
-
-  <!-- Samples -->
+  <Project Path="samples/Qwen3ASR.NET.Realtime/Qwen3ASR.NET.Realtime.csproj" />
   <Project Path="samples\Qwen3ASR.NET.Sample\Qwen3ASR.NET.Sample.csproj" />
+  <Project Path="src\Qwen3ASR.NET.Core\Qwen3ASR.NET.Core.csproj" />
+  <Project Path="src\Qwen3ASR.NET.Runtime.Linux-x64\Qwen3ASR.NET.Runtime.Linux-x64.csproj" />
+  <Project Path="src\Qwen3ASR.NET.Runtime.OSX-arm64\Qwen3ASR.NET.Runtime.OSX-arm64.csproj" />
+  <Project Path="src\Qwen3ASR.NET.Runtime.OSX-x64\Qwen3ASR.NET.Runtime.OSX-x64.csproj" />
+  <Project Path="src\Qwen3ASR.NET.Runtime.Win-x64\Qwen3ASR.NET.Runtime.Win-x64.csproj" />
+  <Project Path="src\Qwen3ASR.NET\Qwen3ASR.NET.csproj" />
+  <Project Path="tests\Qwen3ASR.NET.Tests\Qwen3ASR.NET.Tests.csproj" />
 </Solution>
