@@ -1,7 +1,5 @@
 //! Error types for Qwen3-ASR FFI
 
-use std::fmt;
-
 #[derive(Debug, thiserror::Error)]
 pub enum Qwen3AsrError {
     #[error("Model not found: {0}")]
@@ -18,6 +16,9 @@ pub enum Qwen3AsrError {
 
     #[error("Audio processing error: {0}")]
     AudioProcessingError(String),
+
+    #[error("File error: {0}")]
+    FileError(String),
 
     #[error("Streaming error: {0}")]
     StreamingError(String),
@@ -43,6 +44,7 @@ impl Qwen3AsrError {
             Qwen3AsrError::InferenceError(_) => crate::Qwen3AsrResultCode::InferenceError,
             Qwen3AsrError::InvalidInput(_) => crate::Qwen3AsrResultCode::InvalidParameter,
             Qwen3AsrError::AudioProcessingError(_) => crate::Qwen3AsrResultCode::InferenceError,
+            Qwen3AsrError::FileError(_) => crate::Qwen3AsrResultCode::InferenceError,
             Qwen3AsrError::StreamingError(_) => crate::Qwen3AsrResultCode::StreamError,
             Qwen3AsrError::DeviceError(_) => crate::Qwen3AsrResultCode::InferenceError,
             Qwen3AsrError::IoError(_) => crate::Qwen3AsrResultCode::InferenceError,

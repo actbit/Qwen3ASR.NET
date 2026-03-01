@@ -107,7 +107,7 @@ pub struct Qwen3AsrTranscriptionResult {
 }
 
 /// Detailed transcription information (for JSON serialization)
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranscriptionDetail {
     /// Transcribed text
     pub text: String,
@@ -120,7 +120,7 @@ pub struct TranscriptionDetail {
 }
 
 /// Timestamp information
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Timestamp {
     /// Start time in seconds
     pub start: f32,
