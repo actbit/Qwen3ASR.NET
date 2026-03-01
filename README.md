@@ -157,12 +157,14 @@ Transcription output.
 ### Build
 
 ```bash
-# Build .NET library
+# Build everything (Rust FFI is built automatically via MSBuild)
 dotnet build
 
-# Build Rust FFI library
-cd qwen3_asr_ffi
-cargo build --release
+# Or build a specific runtime package
+dotnet build src/Qwen3ASR.NET.Runtime.Win-x64
+
+# Skip Rust build (use existing native library)
+dotnet build -p:SkipRustBuild=true
 
 # Run tests
 dotnet test
@@ -170,6 +172,11 @@ dotnet test
 # Create NuGet packages
 dotnet pack --configuration Release
 ```
+
+The native Rust library (`qwen3_asr_ffi`) is automatically built when building the Runtime packages. MSBuild will:
+1. Run `cargo build --release` before the .NET build
+2. Copy the resulting native library to the `runtimes/<platform>/native/` folder
+3. Include it in the NuGet package
 
 ## Architecture
 
@@ -206,8 +213,47 @@ Licensed under either of
 
 at your option.
 
+## Dependencies
+
+### Core Dependencies
+
+| Library | Version | License | Description |
+|---------|---------|---------|-------------|
+| [qwen3-asr-rs](https://github.com/lumosimmo/qwen3-asr-rs) | main | MIT/Apache-2.0 | Qwen3-ASR Rust/Candle implementation |
+| [candle-core](https://github.com/huggingface/candle) | 0.9 | MIT/Apache-2.0 | ML framework for Rust (Hugging Face) |
+| [candle-nn](https://github.com/huggingface/candle) | 0.9 | MIT/Apache-2.0 | Neural network layers for Candle |
+| [candle-transformers](https://github.com/huggingface/candle) | 0.9 | MIT/Apache-2.0 | Transformer models for Candle |
+
+### Audio Processing
+
+| Library | Version | License | Description |
+|---------|---------|---------|-------------|
+| [hound](https://github.com/ruuda/hound) | 3.5 | MIT/Apache-2.0 | WAV audio file reader/writer |
+
+### FFI & Utilities
+
+| Library | Version | License | Description |
+|---------|---------|---------|-------------|
+| [libc](https://github.com/rust-lang/libc) | 0.2 | MIT/Apache-2.0 | FFI bindings to system libraries |
+| [thiserror](https://github.com/dtolnay/thiserror) | 1.0 | MIT/Apache-2.0 | Error handling derive macro |
+| [anyhow](https://github.com/dtolnay/anyhow) | 1.0 | MIT/Apache-2.0 | Flexible error handling |
+| [serde](https://github.com/serde-rs/serde) | 1.0 | MIT/Apache-2.0 | Serialization framework |
+| [serde_json](https://github.com/serde-rs/json) | 1.0 | MIT/Apache-2.0 | JSON support for Serde |
+| [log](https://github.com/rust-lang/log) | 0.4 | MIT/Apache-2.0 | Logging facade |
+| [num_cpus](https://github.com/seanmonstar/num_cpus) | 1.16 | MIT/Apache-2.0 | CPU count detection |
+
+### Transitive Dependencies (via qwen3-asr-rs)
+
+| Library | License | Description |
+|---------|---------|-------------|
+| [tokenizers](https://github.com/huggingface/tokenizers) | Apache-2.0 | Fast tokenization library (Hugging Face) |
+| [safetensors](https://github.com/huggingface/safetensors) | Apache-2.0 | Safe tensor serialization |
+| [hf-hub](https://github.com/huggingface/hf-hub) | Apache-2.0 | Hugging Face Hub API client |
+| [ureq](https://github.com/algesten/ureq) | MIT/Apache-2.0 | HTTP client for model downloads |
+
 ## Acknowledgments
 
-- [Qwen3-ASR](https://github.com/QwenLM/Qwen3-Audio) - The original Qwen3-ASR model
-- [qwen3-asr-rs](https://github.com/lumosimmo/qwen3-asr-rs) - Rust implementation
-- [Candle](https://github.com/huggingface/candle) - ML framework for Rust
+- [Qwen3-Audio](https://github.com/QwenLM/Qwen3-Audio) - The original Qwen3-ASR model by Alibaba
+- [qwen3-asr-rs](https://github.com/lumosimmo/qwen3-asr-rs) - Rust/Candle implementation by lumosimmo
+- [Candle](https://github.com/huggingface/candle) - ML framework for Rust by Hugging Face
+- [Hugging Face Hub](https://huggingface.co/) - Model hosting and distribution
