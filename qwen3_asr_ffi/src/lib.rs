@@ -368,6 +368,273 @@ pub unsafe extern "C" fn qwen3_asr_transcribe_file(
     }
 }
 
+/// Transcribe audio from WAV bytes
+///
+/// This function allows transcribing audio directly from a byte array
+/// containing WAV file data, without needing to write to disk.
+///
+/// # Safety
+/// - `handle` must be a valid handle from qwen3_asr_create
+/// - `wav_bytes` must be a valid pointer to WAV file bytes
+/// - `len` must be the number of bytes in wav_bytes
+/// - `language` may be null (auto-detect) or a valid null-terminated UTF-8 string
+/// - The returned result must be freed using qwen3_asr_free_result
+#[no_mangle]
+pub unsafe extern "C" fn qwen3_asr_transcribe_wav_bytes(
+    handle: Qwen3AsrHandle,
+    wav_bytes: *const libc::c_uchar,
+    len: libc::size_t,
+    language: *const libc::c_char,
+) -> Qwen3AsrTranscriptionResult {
+    // Validate handle
+    if handle.is_null() {
+        return Qwen3AsrTranscriptionResult {
+            text: ptr::null_mut(),
+            json_result: ptr::null_mut(),
+            code: Qwen3AsrResultCode::InvalidHandle,
+            error_message: CString::new("Handle is null").unwrap().into_raw(),
+        };
+    }
+
+    // Validate bytes
+    if wav_bytes.is_null() && len > 0 {
+        return Qwen3AsrTranscriptionResult {
+            text: ptr::null_mut(),
+            json_result: ptr::null_mut(),
+            code: Qwen3AsrResultCode::InvalidParameter,
+            error_message: CString::new("wav_bytes is null but len > 0")
+                .unwrap()
+                .into_raw(),
+        };
+    }
+
+    let bytes = if len == 0 { &[] } else { slice::from_raw_parts(wav_bytes, len) };
+
+    // Parse language
+    let lang = if language.is_null() {
+        None
+    } else {
+        match CStr::from_ptr(language).to_str() {
+            Ok(s) if !s.is_empty() => Some(s.to_string()),
+            _ => None,
+        }
+    };
+
+    // Perform transcription
+    let asr_handle = &*handle;
+    match asr_handle.transcribe_wav_bytes(bytes, lang.as_deref()) {
+        Ok(result) => {
+            let text = CString::new(result.text.clone()).unwrap().into_raw();
+            let json_result = CString::new(serde_json::to_string(&result).unwrap_or_default())
+                .unwrap()
+                .into_raw();
+
+            Qwen3AsrTranscriptionResult {
+                text,
+                json_result,
+                code: Qwen3AsrResultCode::Success,
+                error_message: ptr::null_mut(),
+            }
+        }
+        Err(e) => Qwen3AsrTranscriptionResult {
+            text: ptr::null_mut(),
+            json_result: ptr::null_mut(),
+            code: e.as_code(),
+            error_message: CString::new(e.to_string()).unwrap().into_raw(),
+        },
+    }
+}
+
+/// Transcribe 16-bit PCM audio bytes (mono, 16kHz)
+///
+/// This is a convenience function for the most common raw audio format.
+/// The input should be 16-bit signed integer PCM data at 16kHz mono.
+///
+/// # Safety
+/// - `handle` must be a valid handle from qwen3_asr_create
+/// - `pcm_bytes` must be a valid pointer to 16-bit PCM bytes (little-endian)
+/// - `len` must be the number of bytes in pcm_bytes (must be even)
+/// - `language` may be null (auto-detect) or a valid null-terminated UTF-8 string
+/// - The returned result must be freed using qwen3_asr_free_result
+#[no_mangle]
+pub unsafe extern "C" fn qwen3_asr_transcribe_pcm16(
+    handle: Qwen3AsrHandle,
+    pcm_bytes: *const libc::c_uchar,
+    len: libc::size_t,
+    language: *const libc::c_char,
+) -> Qwen3AsrTranscriptionResult {
+    // Validate handle
+    if handle.is_null() {
+        return Qwen3AsrTranscriptionResult {
+            text: ptr::null_mut(),
+            json_result: ptr::null_mut(),
+            code: Qwen3AsrResultCode::InvalidHandle,
+            error_message: CString::new("Handle is null").unwrap().into_raw(),
+        };
+    }
+
+    // Validate bytes
+    if pcm_bytes.is_null() && len > 0 {
+        return Qwen3AsrTranscriptionResult {
+            text: ptr::null_mut(),
+            json_result: ptr::null_mut(),
+            code: Qwen3AsrResultCode::InvalidParameter,
+            error_message: CString::new("pcm_bytes is null but len > 0")
+                .unwrap()
+                .into_raw(),
+        };
+    }
+
+    let bytes = if len == 0 { &[] } else { slice::from_raw_parts(pcm_bytes, len) };
+
+    // Parse language
+    let lang = if language.is_null() {
+        None
+    } else {
+        match CStr::from_ptr(language).to_str() {
+            Ok(s) if !s.is_empty() => Some(s.to_string()),
+            _ => None,
+        }
+    };
+
+    // Perform transcription
+    let asr_handle = &*handle;
+    match asr_handle.transcribe_pcm16(bytes, lang.as_deref()) {
+        Ok(result) => {
+            let text = CString::new(result.text.clone()).unwrap().into_raw();
+            let json_result = CString::new(serde_json::to_string(&result).unwrap_or_default())
+                .unwrap()
+                .into_raw();
+
+            Qwen3AsrTranscriptionResult {
+                text,
+                json_result,
+                code: Qwen3AsrResultCode::Success,
+                error_message: ptr::null_mut(),
+            }
+        }
+        Err(e) => Qwen3AsrTranscriptionResult {
+            text: ptr::null_mut(),
+            json_result: ptr::null_mut(),
+            code: e.as_code(),
+            error_message: CString::new(e.to_string()).unwrap().into_raw(),
+        },
+    }
+}
+
+/// Raw audio format specification for qwen3_asr_transcribe_raw_bytes
+#[repr(C)]
+pub struct Qwen3AsrAudioFormat {
+    /// Sample rate in Hz (e.g., 16000, 44100)
+    pub sample_rate: libc::c_uint,
+    /// Number of channels (1 = mono, 2 = stereo)
+    pub channels: libc::c_ushort,
+    /// Bits per sample (8, 16, 24, 32)
+    pub bits_per_sample: libc::c_ushort,
+    /// Whether the audio is in floating-point format
+    pub is_float: bool,
+}
+
+/// Transcribe audio from raw bytes with format specification
+///
+/// This function allows transcribing raw audio data (non-WAV) by specifying
+/// the format parameters. The audio will be automatically resampled to 16kHz
+/// and converted to mono if necessary.
+///
+/// # Safety
+/// - `handle` must be a valid handle from qwen3_asr_create
+/// - `audio_bytes` must be a valid pointer to raw audio bytes
+/// - `len` must be the number of bytes in audio_bytes
+/// - `format` must be a valid pointer to Qwen3AsrAudioFormat
+/// - `language` may be null (auto-detect) or a valid null-terminated UTF-8 string
+/// - The returned result must be freed using qwen3_asr_free_result
+#[no_mangle]
+pub unsafe extern "C" fn qwen3_asr_transcribe_raw_bytes(
+    handle: Qwen3AsrHandle,
+    audio_bytes: *const libc::c_uchar,
+    len: libc::size_t,
+    format: *const Qwen3AsrAudioFormat,
+    language: *const libc::c_char,
+) -> Qwen3AsrTranscriptionResult {
+    // Validate handle
+    if handle.is_null() {
+        return Qwen3AsrTranscriptionResult {
+            text: ptr::null_mut(),
+            json_result: ptr::null_mut(),
+            code: Qwen3AsrResultCode::InvalidHandle,
+            error_message: CString::new("Handle is null").unwrap().into_raw(),
+        };
+    }
+
+    // Validate format
+    if format.is_null() {
+        return Qwen3AsrTranscriptionResult {
+            text: ptr::null_mut(),
+            json_result: ptr::null_mut(),
+            code: Qwen3AsrResultCode::InvalidParameter,
+            error_message: CString::new("Format pointer is null")
+                .unwrap()
+                .into_raw(),
+        };
+    }
+
+    // Validate bytes
+    if audio_bytes.is_null() && len > 0 {
+        return Qwen3AsrTranscriptionResult {
+            text: ptr::null_mut(),
+            json_result: ptr::null_mut(),
+            code: Qwen3AsrResultCode::InvalidParameter,
+            error_message: CString::new("audio_bytes is null but len > 0")
+                .unwrap()
+                .into_raw(),
+        };
+    }
+
+    let bytes = if len == 0 { &[] } else { slice::from_raw_parts(audio_bytes, len) };
+    let fmt = &*format;
+
+    // Parse language
+    let lang = if language.is_null() {
+        None
+    } else {
+        match CStr::from_ptr(language).to_str() {
+            Ok(s) if !s.is_empty() => Some(s.to_string()),
+            _ => None,
+        }
+    };
+
+    // Perform transcription
+    let asr_handle = &*handle;
+    match asr_handle.transcribe_raw_bytes(
+        bytes,
+        fmt.sample_rate,
+        fmt.channels,
+        fmt.bits_per_sample,
+        fmt.is_float,
+        lang.as_deref(),
+    ) {
+        Ok(result) => {
+            let text = CString::new(result.text.clone()).unwrap().into_raw();
+            let json_result = CString::new(serde_json::to_string(&result).unwrap_or_default())
+                .unwrap()
+                .into_raw();
+
+            Qwen3AsrTranscriptionResult {
+                text,
+                json_result,
+                code: Qwen3AsrResultCode::Success,
+                error_message: ptr::null_mut(),
+            }
+        }
+        Err(e) => Qwen3AsrTranscriptionResult {
+            text: ptr::null_mut(),
+            json_result: ptr::null_mut(),
+            code: e.as_code(),
+            error_message: CString::new(e.to_string()).unwrap().into_raw(),
+        },
+    }
+}
+
 /// Start a streaming transcription session
 ///
 /// # Safety
