@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <!-- Package metadata -->
+    <PackageId>Qwen3ASR.NET.Runtime.Linux-x64</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>Qwen3ASR.NET Contributors</Authors>
+    <Description>Native runtime for Qwen3ASR.NET (Linux x64). This package contains the native libqwen3_asr_ffi.so library.</Description>
+    <PackageTags>speech-recognition;asr;qwen;ai;ml;transcription;native;runtime</PackageTags>
+    <PackageLicenseExpression>MIT OR Apache-2.0</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/your-org/Qwen3ASR.NET</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/your-org/Qwen3ASR.NET</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+
+    <!-- This package contains native binaries, not managed code -->
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+
+    <!-- No need for assembly info -->
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="runtimes\**\*" Pack="true" PackagePath="runtimes" />
+    <None Include="..\..\README.md" Pack="true" PackagePath="" Condition="Exists('..\..\README.md')" />
+  </ItemGroup>
+
+</Project>
