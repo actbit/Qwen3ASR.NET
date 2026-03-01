@@ -1,0 +1,40 @@
+[package]
+name = "qwen3_asr_ffi"
+version = "0.1.0"
+edition = "2021"
+description = "C-compatible FFI bindings for qwen3-asr"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/your-org/Qwen3ASR.NET"
+readme = "README.md"
+keywords = ["speech-recognition", "asr", "qwen", "ffi"]
+categories = ["external-ffi-bindings", "multimedia::audio"]
+
+[lib]
+name = "qwen3_asr_ffi"
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+# FFI utilities
+libc = "0.2"
+thiserror = "1.0"
+
+# Serialization for JSON results
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Logging (optional, can be disabled in release)
+log = "0.4"
+env_logger = { version = "0.11", optional = true }
+
+# CPU detection for default thread count
+num_cpus = "1.16"
+
+[features]
+default = []
+logging = ["env_logger"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

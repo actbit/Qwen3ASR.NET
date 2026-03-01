@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <LangVersion>latest</LangVersion>
+
+    <!-- Package metadata -->
+    <PackageId>Qwen3ASR.NET.Core</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>Qwen3ASR.NET Contributors</Authors>
+    <Description>Core managed library for Qwen3ASR.NET - Qwen3-ASR speech recognition for .NET (requires runtime package)</Description>
+    <PackageTags>speech-recognition;asr;qwen;ai;ml;transcription</PackageTags>
+    <PackageLicenseExpression>MIT OR Apache-2.0</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/your-org/Qwen3ASR.NET</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/your-org/Qwen3ASR.NET</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+
+    <!-- Documentation -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="" Condition="Exists('..\..\README.md')" />
+  </ItemGroup>
+
+</Project>
