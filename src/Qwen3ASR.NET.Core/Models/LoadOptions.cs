@@ -20,6 +20,13 @@ public class LoadOptions
     public string ModelPath { get; set; } = string.Empty;
 
     /// <summary>
+    /// Gets or sets the path to the forced aligner model for timestamp prediction.
+    /// Example: "Qwen/Qwen3-ForcedAligner-0.6B"
+    /// When specified, transcription results will include word-level timestamps.
+    /// </summary>
+    public string? ForcedAlignerPath { get; set; }
+
+    /// <summary>
     /// Gets or sets the specific revision/branch for HuggingFace models.
     /// Optional. If null, uses the default branch.
     /// </summary>
@@ -30,4 +37,13 @@ public class LoadOptions
     /// Set to 0 for automatic detection (recommended).
     /// </summary>
     public int NumThreads { get; set; } = 0;
+
+    /// <summary>
+    /// Gets default load options with Qwen3-ASR-0.6B model.
+    /// </summary>
+    public static LoadOptions Default => new()
+    {
+        ModelPath = "Qwen/Qwen3-ASR-0.6B",
+        Device = DeviceType.Cpu
+    };
 }

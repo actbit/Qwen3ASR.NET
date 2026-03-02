@@ -45,6 +45,8 @@ pub enum Qwen3AsrResultCode {
 pub struct Qwen3AsrLoadOptions {
     pub device: Qwen3AsrDevice,
     pub model_path: *const libc::c_char,
+    /// Optional forced aligner model path for timestamp prediction
+    pub forced_aligner_path: *const libc::c_char,
 }
 
 /// Transcribe options
@@ -166,6 +168,18 @@ pub unsafe extern "C" fn qwen3_asr_load(
     device: Qwen3AsrDevice,
     error_out: *mut *mut libc::c_char,
 ) -> Qwen3AsrHandle {
+    // Call the extended version with null forced_aligner_path
+    qwen3_asr_load_ex(model_path, device, ptr::null(), error_out)
+}
+
+/// Load model with forced aligner support
+#[no_mangle]
+pub unsafe extern "C" fn qwen3_asr_load_ex(
+    model_path: *const libc::c_char,
+    device: Qwen3AsrDevice,
+    forced_aligner_path: *const libc::c_char,
+    error_out: *mut *mut libc::c_char,
+) -> Qwen3AsrHandle {
     let model_path = match parse_c_string(model_path) {
         Some(s) => s,
         None => {
@@ -186,7 +200,12 @@ pub unsafe extern "C" fn qwen3_asr_load(
         }
     };
 
-    let load_opts = LoadOptions::default();
+    // Build load options with optional forced aligner
+    let forced_aligner = parse_c_string(forced_aligner_path);
+    let load_opts = LoadOptions {
+        forced_aligner: forced_aligner.as_deref(),
+        ..Default::default()
+    };
 
     match Qwen3Asr::from_pretrained(&model_path, &candle_device, &load_opts) {
         Ok(model) => Box::into_raw(Box::new(model)),
@@ -289,68 +308,6 @@ pub unsafe extern "C" fn qwen3_asr_transcribe(
         samples: audio_slice,
         sample_rate,
     };
-
-    match model.transcribe(vec![audio_input], transcribe_opts) {
-        Ok(results) => {
-            if let Some(result) = results.first() {
-                success_result(TranscriptionJson {
-                    text: result.text.clone(),
-                    language: result.language.clone(),
-                    timestamps: result.timestamps.clone(),
-                })
-            } else {
-                error_result(Qwen3AsrResultCode::InferenceError, "No transcription result")
-            }
-        }
-        Err(e) => error_result(Qwen3AsrResultCode::InferenceError, &e.to_string()),
-    }
-}
-
-/// Transcribe from file path
-#[no_mangle]
-pub unsafe extern "C" fn qwen3_asr_transcribe_file(
-    handle: Qwen3AsrHandle,
-    file_path: *const libc::c_char,
-    options: *const Qwen3AsrTranscribeOptions,
-) -> Qwen3AsrResult {
-    if handle.is_null() {
-        return error_result(Qwen3AsrResultCode::InvalidHandle, "Handle is null");
-    }
-
-    let path = match parse_c_string(file_path) {
-        Some(s) => s,
-        None => return error_result(Qwen3AsrResultCode::InvalidParameter, "file_path is null"),
-    };
-
-    let opts = if options.is_null() {
-        Qwen3AsrTranscribeOptions {
-            context: ptr::null(),
-            language: ptr::null(),
-            return_timestamps: false,
-            max_new_tokens: 0,
-            max_batch_size: 0,
-            chunk_max_sec: 0.0,
-            bucket_by_length: false,
-        }
-    } else {
-        (*options).clone()
-    };
-
-    let context = parse_c_string(opts.context).unwrap_or_default();
-    let language = parse_c_string(opts.language);
-
-    let transcribe_opts = TranscribeOptions {
-        context: Batch::one(context),
-        language: Batch::one(language),
-        return_timestamps: opts.return_timestamps,
-        max_new_tokens: if opts.max_new_tokens > 0 { opts.max_new_tokens as usize } else { 0 },
-        max_batch_size: if opts.max_batch_size > 0 { opts.max_batch_size as usize } else { 32 },
-        chunk_max_sec: if opts.chunk_max_sec > 0.0 { Some(opts.chunk_max_sec) } else { None },
-        bucket_by_length: opts.bucket_by_length,
-    };
-
-    let model = &*handle;
-    let audio_input = AudioInput::Path(std::path::Path::new(&path));
 
     match model.transcribe(vec![audio_input], transcribe_opts) {
         Ok(results) => {

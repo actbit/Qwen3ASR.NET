@@ -2,32 +2,21 @@
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
 
     <!-- Package metadata -->
     <PackageId>Qwen3ASR.NET</PackageId>
-    <Version>0.1.0</Version>
-    <Authors>Qwen3ASR.NET Contributors</Authors>
     <Description>Qwen3-ASR speech recognition for .NET - Meta package that includes all platforms. For smaller deployments, use Qwen3ASR.NET.Core with specific runtime packages.</Description>
-    <PackageTags>speech-recognition;asr;qwen;ai;ml;transcription</PackageTags>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageProjectUrl>https://github.com/your-org/Qwen3ASR.NET</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/your-org/Qwen3ASR.NET</RepositoryUrl>
-    <RepositoryType>git</RepositoryType>
 
     <!-- This is a meta package with no code -->
     <IncludeBuildOutput>false</IncludeBuildOutput>
-    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="..\..\README.md" Pack="true" PackagePath="" Condition="Exists('..\..\README.md')" />
+    <None Include="..\..\README.md" Pack="true" PackagePath="" />
   </ItemGroup>
 
-  <!-- Project references for build (converted to package references during pack) -->
   <ItemGroup>
     <ProjectReference Include="..\Qwen3ASR.NET.Core\Qwen3ASR.NET.Core.csproj" />
     <ProjectReference Include="..\Qwen3ASR.NET.Runtime.Win-x64\Qwen3ASR.NET.Runtime.Win-x64.csproj" />

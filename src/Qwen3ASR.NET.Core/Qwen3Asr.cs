@@ -40,22 +40,108 @@ public sealed class Qwen3Asr : IDisposable
 
     /// <summary>
     /// Creates a new Qwen3Asr instance from a pretrained model.
+    /// Automatically downloads from HuggingFace if modelPath is a model ID (contains '/').
     /// </summary>
-    /// <param name="modelPath">The model path or HuggingFace model ID (e.g., "Qwen/Qwen3-ASR-0.6B").</param>
+    /// <param name="modelPath">Local path or HuggingFace model ID (e.g., "Qwen/Qwen3-ASR-0.6B").</param>
     /// <param name="device">The device to use for inference. Default is CPU.</param>
+    /// <param name="autoDownload">Whether to automatically download from HuggingFace. Default is true.</param>
+    /// <param name="cacheDirectory">Optional custom cache directory for downloaded models.</param>
+    /// <param name="progress">Optional progress callback for downloads (0.0 - 1.0).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A new Qwen3Asr instance.</returns>
     public static async Task<Qwen3Asr> FromPretrainedAsync(
         string modelPath,
         DeviceType device = DeviceType.Cpu,
+        bool autoDownload = true,
+        string? cacheDirectory = null,
+        IProgress<double>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        return await FromPretrainedAsync(modelPath, null, device, autoDownload, cacheDirectory, progress, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Creates a new Qwen3Asr instance from a pretrained model with optional forced aligner.
+    /// Automatically downloads from HuggingFace if modelPath is a model ID (contains '/').
+    /// </summary>
+    /// <param name="modelPath">Local path or HuggingFace model ID (e.g., "Qwen/Qwen3-ASR-0.6B").</param>
+    /// <param name="forcedAlignerPath">Optional forced aligner model for timestamp prediction (e.g., "Qwen/Qwen3-ForcedAligner-0.6B").</param>
+    /// <param name="device">The device to use for inference. Default is CPU.</param>
+    /// <param name="autoDownload">Whether to automatically download from HuggingFace. Default is true.</param>
+    /// <param name="cacheDirectory">Optional custom cache directory for downloaded models.</param>
+    /// <param name="progress">Optional progress callback for downloads (0.0 - 1.0).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A new Qwen3Asr instance.</returns>
+    public static async Task<Qwen3Asr> FromPretrainedAsync(
+        string modelPath,
+        string? forcedAlignerPath,
+        DeviceType device = DeviceType.Cpu,
+        bool autoDownload = true,
+        string? cacheDirectory = null,
+        IProgress<double>? progress = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(modelPath))
             throw new ArgumentNullException(nameof(modelPath));
 
+        // Check if it's a HuggingFace model ID (contains '/') and not a local path
+        var isHuggingFaceId = modelPath.Contains('/') && !Path.IsPathRooted(modelPath);
+        var isForcedAlignerHuggingFaceId = !string.IsNullOrEmpty(forcedAlignerPath) &&
+                                            forcedAlignerPath!.Contains('/') &&
+                                            !Path.IsPathRooted(forcedAlignerPath);
+
+        string actualModelPath = modelPath;
+        string? actualForcedAlignerPath = forcedAlignerPath;
+
+        if (autoDownload)
+        {
+            if (isHuggingFaceId)
+            {
+                // Check cache first
+                var cachedPath = ModelDownloader.GetCachedModelPath(modelPath, cacheDirectory);
+                if (cachedPath != null)
+                {
+                    actualModelPath = cachedPath;
+                }
+                else
+                {
+                    // Download model
+                    actualModelPath = await ModelDownloader.DownloadModelAsync(
+                        modelPath,
+                        cacheDirectory,
+                        progress,
+                        cancellationToken).ConfigureAwait(false);
+                }
+            }
+
+            if (isForcedAlignerHuggingFaceId && !string.IsNullOrEmpty(forcedAlignerPath))
+            {
+                // Check cache first
+                var cachedPath = ModelDownloader.GetCachedModelPath(forcedAlignerPath!, cacheDirectory);
+                if (cachedPath != null)
+                {
+                    actualForcedAlignerPath = cachedPath;
+                }
+                else
+                {
+                    // Download forced aligner model
+                    actualForcedAlignerPath = await ModelDownloader.DownloadModelAsync(
+                        forcedAlignerPath!,
+                        cacheDirectory,
+                        progress,
+                        cancellationToken).ConfigureAwait(false);
+                }
+            }
+        }
+
         return await Task.Run(() =>
         {
-            var options = new LoadOptions { ModelPath = modelPath, Device = device };
+            var options = new LoadOptions
+            {
+                ModelPath = actualModelPath,
+                ForcedAlignerPath = actualForcedAlignerPath,
+                Device = device
+            };
             return Create(options);
         }, cancellationToken).ConfigureAwait(false);
     }
@@ -73,17 +159,33 @@ public sealed class Qwen3Asr : IDisposable
             throw new ArgumentException("ModelPath is required", nameof(options));
 
         var modelPathPtr = StringToPtr(options.ModelPath);
+        var forcedAlignerPtr = StringToPtr(options.ForcedAlignerPath);
         var deviceType = (NativeBindings.DeviceTypeFFI)options.Device;
 
         try
         {
-            var handle = NativeBindings.qwen3_asr_load(modelPathPtr, deviceType, out var errorMsg);
-
-            if (handle == IntPtr.Zero)
+            IntPtr handle;
+            if (string.IsNullOrEmpty(options.ForcedAlignerPath))
             {
-                var error = PtrToString(errorMsg);
-                NativeBindings.qwen3_asr_free_string(errorMsg);
-                throw new Qwen3AsrException($"Failed to load model: {error}");
+                // Use basic load function without forced aligner
+                handle = NativeBindings.qwen3_asr_load(modelPathPtr, deviceType, out var errorMsg);
+                if (handle == IntPtr.Zero)
+                {
+                    var error = PtrToString(errorMsg);
+                    NativeBindings.qwen3_asr_free_string(errorMsg);
+                    throw new Qwen3AsrException($"Failed to load model: {error}");
+                }
+            }
+            else
+            {
+                // Use extended load function with forced aligner
+                handle = NativeBindings.qwen3_asr_load_ex(modelPathPtr, deviceType, forcedAlignerPtr, out var errorMsg);
+                if (handle == IntPtr.Zero)
+                {
+                    var error = PtrToString(errorMsg);
+                    NativeBindings.qwen3_asr_free_string(errorMsg);
+                    throw new Qwen3AsrException($"Failed to load model: {error}");
+                }
             }
 
             return new Qwen3Asr(handle, options.ModelPath, options.Device);
@@ -91,13 +193,15 @@ public sealed class Qwen3Asr : IDisposable
         finally
         {
             FreeString(modelPathPtr);
+            FreeString(forcedAlignerPtr);
         }
     }
 
     /// <summary>
-    /// Transcribes audio from a WAV file.
+    /// Transcribes audio from an audio file (WAV, AIFF, etc.).
+    /// Uses NWaves for audio loading and resampling.
     /// </summary>
-    /// <param name="filePath">Path to the WAV file.</param>
+    /// <param name="filePath">Path to the audio file.</param>
     /// <param name="options">Transcription options. If null, default options are used.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The transcription result.</returns>
@@ -111,23 +215,9 @@ public sealed class Qwen3Asr : IDisposable
         if (string.IsNullOrEmpty(filePath))
             throw new ArgumentNullException(nameof(filePath));
 
-        // Use native file reading
-        return await Task.Run(() =>
-        {
-            var filePathPtr = StringToPtr(filePath);
-            var opts = BuildTranscribeOptions(options);
-
-            try
-            {
-                var result = NativeBindings.qwen3_asr_transcribe_file(_handle, filePathPtr, ref opts);
-                return ProcessResult(result);
-            }
-            finally
-            {
-                FreeString(filePathPtr);
-                FreeTranscribeOptions(ref opts);
-            }
-        }, cancellationToken).ConfigureAwait(false);
+        // Read and process audio in .NET using NWaves
+        var wavData = await Task.Run(() => WavReader.ReadWav(filePath), cancellationToken).ConfigureAwait(false);
+        return await TranscribeAsync(wavData.Samples, (int)wavData.SampleRate, options, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>

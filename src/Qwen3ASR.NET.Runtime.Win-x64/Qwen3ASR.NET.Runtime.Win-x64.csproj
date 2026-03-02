@@ -2,33 +2,22 @@
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
 
     <!-- Package metadata -->
     <PackageId>Qwen3ASR.NET.Runtime.Win-x64</PackageId>
-    <Version>0.1.0</Version>
-    <Authors>Qwen3ASR.NET Contributors</Authors>
-    <Description>Native runtime for Qwen3ASR.NET (Windows x64). This package contains the native qwen3_asr_ffi.dll library.</Description>
-    <PackageTags>speech-recognition;asr;qwen;ai;ml;transcription;native;runtime</PackageTags>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <Description>Native runtime for Qwen3ASR.NET (Windows x64 with CUDA support)</Description>
+    <PackageTags>speech-recognition;asr;qwen;ai;ml;transcription;native;runtime;cuda</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageProjectUrl>https://github.com/your-org/Qwen3ASR.NET</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/your-org/Qwen3ASR.NET</RepositoryUrl>
-    <RepositoryType>git</RepositoryType>
 
     <!-- This package contains native binaries, not managed code -->
     <IncludeBuildOutput>false</IncludeBuildOutput>
-    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
-
-    <!-- No need for assembly info -->
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
   </PropertyGroup>
 
   <ItemGroup>
     <None Include="runtimes\**\*" Pack="true" PackagePath="runtimes" />
-    <Content Include="runtimes\win-x64\native\qwen3_asr_ffi.dll" CopyToOutputDirectory="PreserveNewest" Link="qwen3_asr_ffi.dll" />
-    <None Include="..\..\README.md" Pack="true" PackagePath="" Condition="Exists('..\..\README.md')" />
+    <Content Include="runtimes\win-x64\native\qwen3_asr_ffi.dll" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\README.md" Pack="true" PackagePath="" />
   </ItemGroup>
 
 </Project>

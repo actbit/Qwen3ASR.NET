@@ -63,6 +63,13 @@ internal static class NativeBindings
         out IntPtr errorOut);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern IntPtr qwen3_asr_load_ex(
+        IntPtr modelPath,
+        DeviceTypeFFI device,
+        IntPtr forcedAlignerPath,
+        out IntPtr errorOut);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     internal static extern void qwen3_asr_destroy(IntPtr handle);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
@@ -82,12 +89,6 @@ internal static class NativeBindings
         [In] float[] samples,
         UIntPtr sampleCount,
         uint sampleRate,
-        ref TranscribeOptionsFFI options);
-
-    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    internal static extern TranscriptionResultFFI qwen3_asr_transcribe_file(
-        IntPtr handle,
-        IntPtr filePath,
         ref TranscribeOptionsFFI options);
 
     #endregion

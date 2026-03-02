@@ -19,6 +19,7 @@ class Program
 
         // Parse arguments
         var modelPath = "Qwen/Qwen3-ASR-0.6B";
+        string? forcedAlignerPath = null;
         Language? language = null;
         int? deviceIndex = null;
         bool useVad = true;  // VAD enabled by default
@@ -32,6 +33,10 @@ class Program
                 case "-m":
                 case "--model":
                     modelPath = args[++i];
+                    break;
+                case "-a":
+                case "--aligner":
+                    forcedAlignerPath = args[++i];
                     break;
                 case "-l":
                 case "--language":
@@ -65,11 +70,15 @@ class Program
         {
             // Load model
             Console.WriteLine($"Loading model: {modelPath}");
+            if (!string.IsNullOrEmpty(forcedAlignerPath))
+            {
+                Console.WriteLine($"Forced Aligner: {forcedAlignerPath}");
+            }
             Console.WriteLine($"Device: {deviceType}");
             Console.WriteLine("This may take a while for the first run (downloading model)...");
             Console.WriteLine();
 
-            using var asr = await Qwen3Asr.FromPretrainedAsync(modelPath, deviceType);
+            using var asr = await Qwen3Asr.FromPretrainedAsync(modelPath, forcedAlignerPath, deviceType);
             Console.WriteLine("Model loaded successfully!");
             Console.WriteLine();
 
@@ -95,6 +104,7 @@ class Program
         Console.WriteLine();
         Console.WriteLine("Options:");
         Console.WriteLine("  -m, --model <path>      Model path or HuggingFace ID (default: Qwen/Qwen3-ASR-0.6B)");
+        Console.WriteLine("  -a, --aligner <path>    Forced aligner model for timestamps (e.g., Qwen/Qwen3-ForcedAligner-0.6B)");
         Console.WriteLine("  -l, --language <lang>   Language code (Japanese, English, Chinese, etc.)");
         Console.WriteLine("  -d, --device <index>    Audio input device index");
         Console.WriteLine("  --gpu, --cuda           Use CUDA GPU for inference (requires NVIDIA GPU)");
@@ -108,6 +118,7 @@ class Program
         Console.WriteLine("  Qwen3ASR.NET.Realtime -l Japanese");
         Console.WriteLine("  Qwen3ASR.NET.Realtime -l English -d 1");
         Console.WriteLine("  Qwen3ASR.NET.Realtime --gpu");
+        Console.WriteLine("  Qwen3ASR.NET.Realtime -a Qwen/Qwen3-ForcedAligner-0.6B");
         Console.WriteLine("  Qwen3ASR.NET.Realtime --no-vad");
     }
 

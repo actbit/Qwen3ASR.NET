@@ -22,6 +22,7 @@ public class TranscriptionOptions
     /// <summary>
     /// Gets or sets whether to return timestamps.
     /// Default is false.
+    /// Note: Requires ForcedAligner model to be loaded for word-level timestamps.
     /// </summary>
     public bool ReturnTimestamps { get; set; }
 

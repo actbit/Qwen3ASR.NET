@@ -1,0 +1,25 @@
+<Project>
+
+  <!-- Common properties for all projects -->
+  <PropertyGroup>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <!-- Package metadata -->
+    <Version>0.2.0</Version>
+    <Authors>Qwen3ASR.NET Contributors</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/actbit/Qwen3ASR.NET</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/actbit/Qwen3ASR.NET</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>speech-recognition;asr;qwen;ai;ml;transcription</PackageTags>
+
+    <!-- NuGet package settings -->
+    <PackageOutputPath>$(SolutionDir)artifacts</PackageOutputPath>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <IncludeSymbols>true</IncludeSymbols>
+  </PropertyGroup>
+
+</Project>

@@ -137,7 +137,8 @@ public class WavReaderTests
     public void ReadWav_InvalidFile_ThrowsException()
     {
         var invalidData = new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 };
-        Assert.Throws<InvalidDataException>(() => WavReader.ReadWav(invalidData));
+        // NWaves throws FormatException for invalid WAV data
+        Assert.Throws<FormatException>(() => WavReader.ReadWav(invalidData));
     }
 
     [Fact]
@@ -159,7 +160,8 @@ public class WavReaderTests
         writer.Write((short)2);
         writer.Write((short)16);
 
-        Assert.Throws<InvalidDataException>(() => WavReader.ReadWav(memoryStream.ToArray()));
+        // NWaves throws EndOfStreamException when data chunk is missing
+        Assert.Throws<EndOfStreamException>(() => WavReader.ReadWav(memoryStream.ToArray()));
     }
 
     [Fact]
@@ -262,20 +264,25 @@ public class WavReaderTests
     }
 
     [Fact]
-    public void ReadWav_NonPCMFormat_ThrowsException()
+    public void ReadWav_IEEEFloatFormat_Works()
     {
+        // NWaves supports IEEE float format (format code 3)
         using var memoryStream = new MemoryStream();
         using var writer = new BinaryWriter(memoryStream);
 
+        int samples = 100;
+        int dataSize = samples * 4;
+        int fileSize = 36 + dataSize;
+
         // RIFF header
         writer.Write("RIFF".ToCharArray());
-        writer.Write(50);
+        writer.Write(fileSize);
         writer.Write("WAVE".ToCharArray());
 
-        // fmt chunk with non-PCM format (format code 3 = IEEE float)
+        // fmt chunk with IEEE float format (format code 3)
         writer.Write("fmt ".ToCharArray());
         writer.Write(16);
-        writer.Write((short)3); // Non-PCM
+        writer.Write((short)3); // IEEE float
         writer.Write((short)1);
         writer.Write(16000);
         writer.Write(64000);
@@ -284,10 +291,15 @@ public class WavReaderTests
 
         // data chunk
         writer.Write("data".ToCharArray());
-        writer.Write(4);
-        writer.Write(0f);
+        writer.Write(dataSize);
 
-        Assert.Throws<NotSupportedException>(() => WavReader.ReadWav(memoryStream.ToArray()));
+        for (int i = 0; i < samples; i++)
+        {
+            writer.Write(0.5f); // Write float samples
+        }
+
+        var result = WavReader.ReadWav(memoryStream.ToArray());
+        Assert.Equal(100, result.Samples.Length);
     }
 
     [Fact]
