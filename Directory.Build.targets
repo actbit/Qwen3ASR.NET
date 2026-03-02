@@ -4,6 +4,9 @@
 
     This file automatically builds the Rust native library when building
     Runtime packages. It detects the platform and builds accordingly.
+
+    Default packages include GPU support (CUDA for Windows/Linux, Metal for macOS).
+    The DLL automatically falls back to CPU if GPU is not available.
   -->
 
   <!-- Skip for projects that don't need native builds -->
@@ -20,25 +23,33 @@
     <RustProjectDir>$(MSBuildThisFileDirectory)qwen3_asr_ffi\</RustProjectDir>
     <RustTargetDir>$(RustProjectDir)target\</RustTargetDir>
 
-    <!-- Windows x64 -->
-    <NativeDllName Condition="$(MSBuildProjectName.Contains('Win-x64'))">qwen3_asr_ffi.dll</NativeDllName>
-    <RustTarget Condition="$(MSBuildProjectName.Contains('Win-x64'))">x86_64-pc-windows-msvc</RustTarget>
-    <RuntimeIdentifier Condition="$(MSBuildProjectName.Contains('Win-x64'))">win-x64</RuntimeIdentifier>
+    <!-- Windows x64 (CUDA enabled by default for GPU support, falls back to CPU if no GPU) -->
+    <NativeDllName Condition="$(MSBuildProjectName.Equals('Qwen3ASR.NET.Runtime.Win-x64'))">qwen3_asr_ffi.dll</NativeDllName>
+    <RustTarget Condition="$(MSBuildProjectName.Equals('Qwen3ASR.NET.Runtime.Win-x64'))">x86_64-pc-windows-msvc</RustTarget>
+    <RuntimeIdentifier Condition="$(MSBuildProjectName.Equals('Qwen3ASR.NET.Runtime.Win-x64'))">win-x64</RuntimeIdentifier>
+    <RustFeatures Condition="$(MSBuildProjectName.Equals('Qwen3ASR.NET.Runtime.Win-x64')) AND '$(BuildWithCuda)' != 'false'">cuda</RustFeatures>
+    <!-- CUDA Compute Capability: 75=RTX20, 86=RTX30 (default: 75 for RTX20+ support) -->
+    <CudaComputeCap Condition="$(MSBuildProjectName.Equals('Qwen3ASR.NET.Runtime.Win-x64')) AND '$(BuildWithCuda)' != 'false' AND '$(CudaComputeCap)' == ''">75</CudaComputeCap>
 
-    <!-- Linux x64 -->
-    <NativeDllName Condition="$(MSBuildProjectName.Contains('Linux-x64'))">libqwen3_asr_ffi.so</NativeDllName>
-    <RustTarget Condition="$(MSBuildProjectName.Contains('Linux-x64'))">x86_64-unknown-linux-gnu</RustTarget>
-    <RuntimeIdentifier Condition="$(MSBuildProjectName.Contains('Linux-x64'))">linux-x64</RuntimeIdentifier>
+    <!-- Linux x64 (CUDA enabled by default for GPU support, falls back to CPU if no GPU) -->
+    <NativeDllName Condition="$(MSBuildProjectName.Equals('Qwen3ASR.NET.Runtime.Linux-x64'))">libqwen3_asr_ffi.so</NativeDllName>
+    <RustTarget Condition="$(MSBuildProjectName.Equals('Qwen3ASR.NET.Runtime.Linux-x64'))">x86_64-unknown-linux-gnu</RustTarget>
+    <RuntimeIdentifier Condition="$(MSBuildProjectName.Equals('Qwen3ASR.NET.Runtime.Linux-x64'))">linux-x64</RuntimeIdentifier>
+    <RustFeatures Condition="$(MSBuildProjectName.Equals('Qwen3ASR.NET.Runtime.Linux-x64')) AND '$(BuildWithCuda)' != 'false'">cuda</RustFeatures>
+    <!-- CUDA Compute Capability: 75=RTX20, 86=RTX30 (default: 75 for RTX20+ support) -->
+    <CudaComputeCap Condition="$(MSBuildProjectName.Equals('Qwen3ASR.NET.Runtime.Linux-x64')) AND '$(BuildWithCuda)' != 'false' AND '$(CudaComputeCap)' == ''">75</CudaComputeCap>
 
-    <!-- macOS x64 -->
-    <NativeDllName Condition="$(MSBuildProjectName.Contains('OSX-x64'))">libqwen3_asr_ffi.dylib</NativeDllName>
-    <RustTarget Condition="$(MSBuildProjectName.Contains('OSX-x64'))">x86_64-apple-darwin</RustTarget>
-    <RuntimeIdentifier Condition="$(MSBuildProjectName.Contains('OSX-x64'))">osx-x64</RuntimeIdentifier>
+    <!-- macOS x64 (Metal enabled by default for GPU support, falls back to CPU if no GPU) -->
+    <NativeDllName Condition="$(MSBuildProjectName.Equals('Qwen3ASR.NET.Runtime.OSX-x64'))">libqwen3_asr_ffi.dylib</NativeDllName>
+    <RustTarget Condition="$(MSBuildProjectName.Equals('Qwen3ASR.NET.Runtime.OSX-x64'))">x86_64-apple-darwin</RustTarget>
+    <RuntimeIdentifier Condition="$(MSBuildProjectName.Equals('Qwen3ASR.NET.Runtime.OSX-x64'))">osx-x64</RuntimeIdentifier>
+    <RustFeatures Condition="$(MSBuildProjectName.Equals('Qwen3ASR.NET.Runtime.OSX-x64')) AND '$(BuildWithMetal)' != 'false'">metal</RustFeatures>
 
-    <!-- macOS arm64 -->
-    <NativeDllName Condition="$(MSBuildProjectName.Contains('OSX-arm64'))">libqwen3_asr_ffi.dylib</NativeDllName>
-    <RustTarget Condition="$(MSBuildProjectName.Contains('OSX-arm64'))">aarch64-apple-darwin</RustTarget>
-    <RuntimeIdentifier Condition="$(MSBuildProjectName.Contains('OSX-arm64'))">osx-arm64</RuntimeIdentifier>
+    <!-- macOS arm64 (Metal enabled by default for GPU support, falls back to CPU if no GPU) -->
+    <NativeDllName Condition="$(MSBuildProjectName.Equals('Qwen3ASR.NET.Runtime.OSX-arm64'))">libqwen3_asr_ffi.dylib</NativeDllName>
+    <RustTarget Condition="$(MSBuildProjectName.Equals('Qwen3ASR.NET.Runtime.OSX-arm64'))">aarch64-apple-darwin</RustTarget>
+    <RuntimeIdentifier Condition="$(MSBuildProjectName.Equals('Qwen3ASR.NET.Runtime.OSX-arm64'))">osx-arm64</RuntimeIdentifier>
+    <RustFeatures Condition="$(MSBuildProjectName.Equals('Qwen3ASR.NET.Runtime.OSX-arm64')) AND '$(BuildWithMetal)' != 'false'">metal</RustFeatures>
 
     <!-- Output paths -->
     <NativeOutputPath>$(MSBuildProjectDirectory)\runtimes\$(RuntimeIdentifier)\native\</NativeOutputPath>
@@ -56,10 +67,11 @@
           BeforeTargets="BeforeBuild"
           Condition="'$(_SkipNativeBuild)' != 'true' AND '$(SkipRustBuild)' != 'true'">
 
-    <Message Importance="high" Text="Building Rust FFI library for $(RuntimeIdentifier)..." />
+    <Message Importance="high" Text="Building Rust FFI library for $(RuntimeIdentifier) ($(RustFeatures))..." />
     <Message Importance="low" Text="  RustProjectDir: $(RustProjectDir)" />
     <Message Importance="low" Text="  RustTarget: $(RustTarget)" />
     <Message Importance="low" Text="  RustConfiguration: $(RustConfiguration)" />
+    <Message Importance="low" Text="  RustFeatures: $(RustFeatures)" />
 
     <!-- Check if cargo is available -->
     <Exec Command="cargo --version"
@@ -80,18 +92,37 @@
     <Message Importance="low" Text="  Cargo version: $(CargoVersion)" />
 
     <!-- Build the Rust library -->
-    <!-- On Windows, build directly. On other platforms, cross-compile if needed. -->
     <PropertyGroup>
       <CargoBuildCommand Condition="'$(RustConfiguration)' == 'release'">cargo build --release</CargoBuildCommand>
       <CargoBuildCommand Condition="'$(RustConfiguration)' != 'release'">cargo build</CargoBuildCommand>
 
-      <!-- Add target if cross-compiling (not the host target) -->
-      <CargoBuildCommand Condition="$(MSBuildProjectName.Contains('Win-x64')) AND '$(OS)' == 'Windows_NT'">$(CargoBuildCommand)</CargoBuildCommand>
+      <!-- Add features if specified (cuda or metal) -->
+      <CargoBuildCommand Condition="'$(RustFeatures)' != ''">$(CargoBuildCommand) --features $(RustFeatures)</CargoBuildCommand>
+
+      <!-- Add target if cross-compiling -->
       <CargoBuildCommand Condition="$(MSBuildProjectName.Contains('Linux-x64')) AND '$(OS)' != 'Unix'">$(CargoBuildCommand) --target $(RustTarget)</CargoBuildCommand>
       <CargoBuildCommand Condition="$(MSBuildProjectName.Contains('OSX'))">$(CargoBuildCommand) --target $(RustTarget)</CargoBuildCommand>
+
+      <!-- For CUDA builds on Windows, we need to run vcvarsall.bat first -->
+      <_VcvarsPath Condition="'$(OS)' == 'Windows_NT' AND '$(RustFeatures)' == 'cuda'">$(ProgramFiles)\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat</_VcvarsPath>
+      <_VcvarsPath Condition="'$(OS)' == 'Windows_NT' AND '$(RustFeatures)' == 'cuda' AND !Exists('$(_VcvarsPath)')">$(ProgramFiles)\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvarsall.bat</_VcvarsPath>
+      <_VcvarsPath Condition="'$(OS)' == 'Windows_NT' AND '$(RustFeatures)' == 'cuda' AND !Exists('$(_VcvarsPath)')">$(ProgramFiles)\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat</_VcvarsPath>
+      <_VcvarsPath Condition="'$(OS)' == 'Windows_NT' AND '$(RustFeatures)' == 'cuda' AND !Exists('$(_VcvarsPath)')">$(ProgramFiles)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvarsall.bat</_VcvarsPath>
+      <_VcvarsPath Condition="'$(OS)' == 'Windows_NT' AND '$(RustFeatures)' == 'cuda' AND !Exists('$(_VcvarsPath)')">$(ProgramFiles)\Microsoft Visual Studio\2019\Professional\VC\Auxiliary\Build\vcvarsall.bat</_VcvarsPath>
+      <_VcvarsPath Condition="'$(OS)' == 'Windows_NT' AND '$(RustFeatures)' == 'cuda' AND !Exists('$(_VcvarsPath)')">$(ProgramFiles)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvarsall.bat</_VcvarsPath>
+
+      <!-- Wrap command with vcvarsall.bat if needed -->
+      <!-- Set CUDA_COMPUTE_CAP for wider GPU support (GTX 10, RTX 20, RTX 30, etc.) -->
+      <_SetCudaEnv Condition="'$(CudaComputeCap)' != ''">set CUDA_COMPUTE_CAP=$(CudaComputeCap)&amp;</_SetCudaEnv>
+      <_SetCudaEnv Condition="'$(CudaComputeCap)' == ''"></_SetCudaEnv>
+      <_FinalBuildCommand Condition="'$(_VcvarsPath)' != '' AND Exists('$(_VcvarsPath)')">call "$(_VcvarsPath)" x64 &amp;&amp; $(_SetCudaEnv)$(CargoBuildCommand)</_FinalBuildCommand>
+      <_FinalBuildCommand Condition="'$(_FinalBuildCommand)' == '' AND '$(CudaComputeCap)' != ''">CUDA_COMPUTE_CAP=$(CudaComputeCap) $(CargoBuildCommand)</_FinalBuildCommand>
+      <_FinalBuildCommand Condition="'$(_FinalBuildCommand)' == ''">$(CargoBuildCommand)</_FinalBuildCommand>
     </PropertyGroup>
 
-    <Exec Command="$(CargoBuildCommand)"
+    <Message Importance="low" Text="  Build command: $(_FinalBuildCommand)" Condition="'$(OS)' == 'Windows_NT' AND '$(RustFeatures)' == 'cuda'" />
+
+    <Exec Command="$(_FinalBuildCommand)"
           WorkingDirectory="$(RustProjectDir)"
           ConsoleToMSBuild="false">
       <Output TaskParameter="ExitCode" PropertyName="CargoExitCode" />

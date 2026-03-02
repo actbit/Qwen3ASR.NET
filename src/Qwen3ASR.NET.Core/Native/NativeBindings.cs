@@ -4,6 +4,7 @@ namespace Qwen3ASR.NET.Native;
 
 /// <summary>
 /// Native FFI bindings for qwen3_asr_ffi library.
+/// Supports dynamic DLL loading for GPU support.
 /// </summary>
 internal static class NativeBindings
 {
@@ -59,7 +60,7 @@ internal static class NativeBindings
     internal static extern IntPtr qwen3_asr_load(
         IntPtr modelPath,
         DeviceTypeFFI device,
-        out IntPtr errorMsg);
+        out IntPtr errorOut);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     internal static extern void qwen3_asr_destroy(IntPtr handle);

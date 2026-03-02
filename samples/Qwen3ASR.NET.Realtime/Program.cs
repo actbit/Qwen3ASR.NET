@@ -21,6 +21,9 @@ class Program
         var modelPath = "Qwen/Qwen3-ASR-0.6B";
         Language? language = null;
         int? deviceIndex = null;
+        bool useVad = true;  // VAD enabled by default
+        float vadThreshold = 0.01f;
+        DeviceType deviceType = DeviceType.Cpu;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -38,6 +41,19 @@ class Program
                 case "--device":
                     deviceIndex = int.Parse(args[++i]);
                     break;
+                case "--no-vad":
+                    useVad = false;
+                    break;
+                case "--vad-threshold":
+                    vadThreshold = float.Parse(args[++i]);
+                    break;
+                case "--gpu":
+                case "--cuda":
+                    deviceType = DeviceType.Cuda;
+                    break;
+                case "--metal":
+                    deviceType = DeviceType.Metal;
+                    break;
                 case "-h":
                 case "--help":
                     PrintHelp();
@@ -49,10 +65,11 @@ class Program
         {
             // Load model
             Console.WriteLine($"Loading model: {modelPath}");
+            Console.WriteLine($"Device: {deviceType}");
             Console.WriteLine("This may take a while for the first run (downloading model)...");
             Console.WriteLine();
 
-            using var asr = await Qwen3Asr.FromPretrainedAsync(modelPath, DeviceType.Cpu);
+            using var asr = await Qwen3Asr.FromPretrainedAsync(modelPath, deviceType);
             Console.WriteLine("Model loaded successfully!");
             Console.WriteLine();
 
@@ -60,7 +77,7 @@ class Program
             ListAudioDevices();
 
             // Start real-time transcription
-            await RunRealtimeTranscription(asr, language, deviceIndex);
+            await RunRealtimeTranscription(asr, language, deviceIndex, useVad, vadThreshold);
         }
         catch (Exception ex)
         {
@@ -80,12 +97,18 @@ class Program
         Console.WriteLine("  -m, --model <path>      Model path or HuggingFace ID (default: Qwen/Qwen3-ASR-0.6B)");
         Console.WriteLine("  -l, --language <lang>   Language code (Japanese, English, Chinese, etc.)");
         Console.WriteLine("  -d, --device <index>    Audio input device index");
+        Console.WriteLine("  --gpu, --cuda           Use CUDA GPU for inference (requires NVIDIA GPU)");
+        Console.WriteLine("  --metal                 Use Metal GPU for inference (macOS only)");
+        Console.WriteLine("  --no-vad                Disable Voice Activity Detection");
+        Console.WriteLine("  --vad-threshold <val>   VAD energy threshold (default: 0.01)");
         Console.WriteLine("  -h, --help              Show this help message");
         Console.WriteLine();
         Console.WriteLine("Examples:");
         Console.WriteLine("  Qwen3ASR.NET.Realtime");
         Console.WriteLine("  Qwen3ASR.NET.Realtime -l Japanese");
         Console.WriteLine("  Qwen3ASR.NET.Realtime -l English -d 1");
+        Console.WriteLine("  Qwen3ASR.NET.Realtime --gpu");
+        Console.WriteLine("  Qwen3ASR.NET.Realtime --no-vad");
     }
 
     static Language? ParseLanguage(string lang)
@@ -122,12 +145,13 @@ class Program
         Console.WriteLine();
     }
 
-    static async Task RunRealtimeTranscription(Qwen3Asr asr, Language? language, int? deviceIndex)
+    static async Task RunRealtimeTranscription(Qwen3Asr asr, Language? language, int? deviceIndex, bool useVad, float vadThreshold)
     {
         var cancellationTokenSource = new CancellationTokenSource();
 
         Console.WriteLine("Starting real-time transcription...");
         Console.WriteLine($"Language: {language?.ToString() ?? "Auto"}");
+        Console.WriteLine($"VAD: {(useVad ? $"Enabled (threshold: {vadThreshold})" : "Disabled")}");
         Console.WriteLine();
         Console.WriteLine("Press ENTER to stop recording...");
         Console.WriteLine("-------------------------------------------");
@@ -143,13 +167,16 @@ class Program
         var devices = PvRecorder.GetAvailableDevices();
         if (selectedDevice >= 0 && selectedDevice < devices.Length)
         {
-            Console.WriteLine($"Using device: {devices[selectedDevice]}");
+            Console.WriteLine($"Using device [{selectedDevice}]");
         }
         else
         {
             Console.WriteLine("Using default audio device");
         }
         Console.WriteLine();
+
+        // Create VAD filter
+        VadFilter? vad = useVad ? new VadFilter(sampleRate, vadThreshold, 300) : null;
 
         // Create PvRecorder
         using var recorder = PvRecorder.Create(frameLength: frameLength, deviceIndex: selectedDevice);
@@ -189,9 +216,18 @@ class Program
                         floatFrame[i] = frame[i] / 32768f;
                     }
 
-                    lock (bufferLock)
+                    // Apply VAD if enabled
+                    if (vad != null)
                     {
-                        audioBuffer.AddRange(floatFrame);
+                        vad.Process(floatFrame);
+                        // VAD buffers speech internally
+                    }
+                    else
+                    {
+                        lock (bufferLock)
+                        {
+                            audioBuffer.AddRange(floatFrame);
+                        }
                     }
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
@@ -214,14 +250,29 @@ class Program
                 {
                     await Task.Delay(processInterval, cancellationTokenSource.Token);
 
-                    float[] chunkToProcess;
-                    lock (bufferLock)
+                    float[]? chunkToProcess = null;
+
+                    if (vad != null)
                     {
-                        if (audioBuffer.Count < chunkSize)
+                        // Get buffered speech from VAD
+                        var bufferedSamples = vad.BufferedSampleCount;
+                        if (bufferedSamples < chunkSize)
                             continue;
 
-                        chunkToProcess = audioBuffer.ToArray();
-                        audioBuffer.Clear();
+                        chunkToProcess = vad.Flush();
+                        if (chunkToProcess == null || chunkToProcess.Length == 0)
+                            continue;
+                    }
+                    else
+                    {
+                        lock (bufferLock)
+                        {
+                            if (audioBuffer.Count < chunkSize)
+                                continue;
+
+                            chunkToProcess = audioBuffer.ToArray();
+                            audioBuffer.Clear();
+                        }
                     }
 
                     // Push audio to streaming transcriber
@@ -262,6 +313,11 @@ class Program
         Console.WriteLine();
         Console.WriteLine();
         Console.WriteLine("Finalizing transcription...");
+
+        if (vad != null)
+        {
+            Console.WriteLine($"VAD Stats: Silence filtered = {vad.SilenceDuration.TotalSeconds:F1}s / Total = {vad.TotalDuration.TotalSeconds:F1}s");
+        }
 
         var final = await stream.FinishAsync();
 
