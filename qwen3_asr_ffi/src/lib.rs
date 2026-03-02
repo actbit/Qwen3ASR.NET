@@ -85,8 +85,46 @@ pub struct TranscriptionJson {
 fn create_device(device_type: Qwen3AsrDevice) -> anyhow::Result<Device> {
     match device_type {
         Qwen3AsrDevice::Cpu => Ok(Device::Cpu),
-        Qwen3AsrDevice::Cuda => Device::new_cuda(0).map_err(|e| anyhow::anyhow!("{}", e)),
-        Qwen3AsrDevice::Metal => Device::new_metal(0).map_err(|e| anyhow::anyhow!("{}", e)),
+        Qwen3AsrDevice::Cuda => {
+            #[cfg(feature = "cuda")]
+            {
+                match Device::new_cuda(0) {
+                    Ok(device) => {
+                        log::info!("CUDA device initialized successfully");
+                        Ok(device)
+                    }
+                    Err(e) => {
+                        log::warn!("CUDA initialization failed ({}), falling back to CPU", e);
+                        Ok(Device::Cpu)
+                    }
+                }
+            }
+            #[cfg(not(feature = "cuda"))]
+            {
+                log::warn!("CUDA support not compiled in, using CPU");
+                Ok(Device::Cpu)
+            }
+        }
+        Qwen3AsrDevice::Metal => {
+            #[cfg(feature = "metal")]
+            {
+                match Device::new_metal(0) {
+                    Ok(device) => {
+                        log::info!("Metal device initialized successfully");
+                        Ok(device)
+                    }
+                    Err(e) => {
+                        log::warn!("Metal initialization failed ({}), falling back to CPU", e);
+                        Ok(Device::Cpu)
+                    }
+                }
+            }
+            #[cfg(not(feature = "metal"))]
+            {
+                log::warn!("Metal support not compiled in, using CPU");
+                Ok(Device::Cpu)
+            }
+        }
     }
 }
 
