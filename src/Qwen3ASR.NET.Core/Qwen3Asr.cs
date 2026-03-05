@@ -31,6 +31,11 @@ public sealed class Qwen3Asr : IDisposable
     /// </summary>
     public bool IsLoaded => _handle != IntPtr.Zero;
 
+    /// <summary>
+    /// Gets the native handle for internal use.
+    /// </summary>
+    internal IntPtr Handle => _handle;
+
     private Qwen3Asr(IntPtr handle, string modelPath, DeviceType device)
     {
         _handle = handle;

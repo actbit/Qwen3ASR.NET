@@ -63,8 +63,8 @@ public static class ModelDownloader
             // Get model info
             var modelInfo = await GetModelInfoAsync(modelId, cancellationToken);
 
-            // Download required files
-            var requiredFiles = new[] { "config.json", "model.safetensors", "tokenizer.json", "tokenizer_config.json" };
+            // Download required files (Qwen3-ASR uses vocab.json and merges.txt instead of tokenizer.json)
+            var requiredFiles = new[] { "config.json", "model.safetensors", "tokenizer_config.json", "vocab.json", "merges.txt", "preprocessor_config.json", "generation_config.json" };
             var totalFiles = requiredFiles.Length;
             var completedFiles = 0;
 
@@ -139,8 +139,8 @@ public static class ModelDownloader
         if (!Directory.Exists(modelDir))
             return false;
 
-        // Check for essential files
-        var requiredFiles = new[] { "config.json", "model.safetensors" };
+        // Check for essential files (Qwen3-ASR specific)
+        var requiredFiles = new[] { "config.json", "model.safetensors", "vocab.json", "merges.txt" };
         return requiredFiles.All(f => File.Exists(Path.Combine(modelDir, f)));
     }
 

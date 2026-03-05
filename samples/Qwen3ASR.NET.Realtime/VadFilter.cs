@@ -1,17 +1,16 @@
 namespace Qwen3ASR.NET.Realtime;
 
 /// <summary>
-/// Simple energy-based Voice Activity Detection (VAD)
+/// Voice Activity Detection (VAD) with silence padding
+/// Keeps the audio stream continuous by including silence periods
 /// </summary>
 public class VadFilter
 {
     private readonly float _energyThreshold;
-    private readonly int _silenceDurationMs;
     private readonly int _sampleRate;
 
-    private int _silenceSampleCount;
-    private int _silenceThresholdSamples;
-    private readonly List<float> _speechBuffer = new();
+    private readonly List<float> _audioBuffer = new();
+    private readonly object _bufferLock = new();
 
     /// <summary>
     /// Gets the total duration of audio processed.
@@ -19,7 +18,7 @@ public class VadFilter
     public TimeSpan TotalDuration { get; private set; }
 
     /// <summary>
-    /// Gets the duration of silence filtered out.
+    /// Gets the duration of silence detected.
     /// </summary>
     public TimeSpan SilenceDuration { get; private set; }
 
@@ -28,66 +27,143 @@ public class VadFilter
     /// </summary>
     /// <param name="sampleRate">Audio sample rate.</param>
     /// <param name="energyThreshold">Energy threshold (0.0-1.0). Default: 0.01</param>
-    /// <param name="silenceDurationMs">Silence duration in ms to filter out. Default: 300ms</param>
+    /// <param name="silenceDurationMs">Ignored (kept for API compatibility).</param>
     public VadFilter(int sampleRate, float energyThreshold = 0.01f, int silenceDurationMs = 300)
     {
         _sampleRate = sampleRate;
         _energyThreshold = energyThreshold;
-        _silenceDurationMs = silenceDurationMs;
-        _silenceThresholdSamples = (int)(sampleRate * silenceDurationMs / 1000.0);
     }
 
     /// <summary>
-    /// Processes audio samples and returns only speech segments.
+    /// Processes audio samples - always adds to buffer (silence as zeros, speech as-is).
     /// </summary>
     /// <param name="samples">Input audio samples.</param>
-    /// <returns>Audio samples with silence removed, or null if all silence.</returns>
+    /// <returns>Always null (use Flush to get buffered audio).</returns>
     public float[]? Process(float[] samples)
     {
         TotalDuration += TimeSpan.FromSeconds((double)samples.Length / _sampleRate);
 
         // Calculate RMS energy
         float energy = CalculateEnergy(samples);
+        bool isSilence = energy < _energyThreshold;
 
-        if (energy < _energyThreshold)
+        if (isSilence)
         {
-            // Silence detected
-            _silenceSampleCount += samples.Length;
-
-            // If we have accumulated silence, don't return anything
             SilenceDuration += TimeSpan.FromSeconds((double)samples.Length / _sampleRate);
-            return null;
         }
-        else
+
+        // Always add to buffer: silence as zeros, speech as-is
+        lock (_bufferLock)
         {
-            // Speech detected
-            _silenceSampleCount = 0;
-
-            // Add to speech buffer
-            lock (_speechBuffer)
+            if (isSilence)
             {
-                _speechBuffer.AddRange(samples);
+                // Add silence as zeros to maintain timing
+                _audioBuffer.AddRange(samples);
             }
+            else
+            {
+                // Add actual speech
+                _audioBuffer.AddRange(samples);
+            }
+        }
 
-            return null; // We accumulate and return on Flush
+        return null; // Use Flush to get buffered audio
+    }
+
+    /// <summary>
+    /// Flushes buffered audio and clears the buffer.
+    /// </summary>
+    /// <returns>Buffered audio samples, or null if empty or all silence.</returns>
+    public float[]? Flush()
+    {
+        lock (_bufferLock)
+        {
+            if (_audioBuffer.Count == 0)
+                return null;
+
+            var result = _audioBuffer.ToArray();
+            _audioBuffer.Clear();
+
+            // Return null if all silence (all zeros)
+            if (IsAllSilence(result))
+                return null;
+
+            return result;
         }
     }
 
     /// <summary>
-    /// Flushes any remaining buffered audio.
+    /// Gets buffered audio without clearing.
     /// </summary>
-    /// <returns>Buffered audio samples, or null if empty.</returns>
-    public float[]? Flush()
+    /// <returns>Buffered audio samples, or null if empty or all silence.</returns>
+    public float[]? PeekBuffer()
     {
-        lock (_speechBuffer)
+        lock (_bufferLock)
         {
-            if (_speechBuffer.Count == 0)
+            if (_audioBuffer.Count == 0)
                 return null;
 
-            var result = _speechBuffer.ToArray();
-            _speechBuffer.Clear();
+            var result = _audioBuffer.ToArray();
+
+            // Return null if all silence
+            if (IsAllSilence(result))
+                return null;
+
             return result;
         }
+    }
+
+    /// <summary>
+    /// Gets the actual buffer count (ignoring trailing silence).
+    /// </summary>
+    public int GetEffectiveBufferCount()
+    {
+        lock (_bufferLock)
+        {
+            if (_audioBuffer.Count == 0)
+                return 0;
+
+            // Check if there's any non-silence in the buffer
+            foreach (var sample in _audioBuffer)
+            {
+                if (Math.Abs(sample) > 0.0001f)
+                    return _audioBuffer.Count;
+            }
+
+            return 0; // All silence
+        }
+    }
+
+    /// <summary>
+    /// Clears specified number of samples from the beginning of the buffer.
+    /// </summary>
+    public void ConsumeSamples(int count)
+    {
+        lock (_bufferLock)
+        {
+            if (count >= _audioBuffer.Count)
+            {
+                _audioBuffer.Clear();
+            }
+            else
+            {
+                _audioBuffer.RemoveRange(0, count);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Checks if all samples are effectively silence (near zero).
+    /// </summary>
+    private static bool IsAllSilence(float[] samples)
+    {
+        const float threshold = 0.0001f;
+        foreach (var sample in samples)
+        {
+            if (Math.Abs(sample) > threshold)
+                return false;
+        }
+        return true;
     }
 
     /// <summary>
@@ -97,9 +173,9 @@ public class VadFilter
     {
         get
         {
-            lock (_speechBuffer)
+            lock (_bufferLock)
             {
-                return _speechBuffer.Count;
+                return _audioBuffer.Count;
             }
         }
     }
@@ -109,10 +185,9 @@ public class VadFilter
     /// </summary>
     public void Reset()
     {
-        lock (_speechBuffer)
+        lock (_bufferLock)
         {
-            _speechBuffer.Clear();
-            _silenceSampleCount = 0;
+            _audioBuffer.Clear();
         }
         TotalDuration = TimeSpan.Zero;
         SilenceDuration = TimeSpan.Zero;

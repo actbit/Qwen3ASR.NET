@@ -2,7 +2,7 @@
   "profiles": {
     "Qwen3ASR.NET.Realtime": {
       "commandName": "Project",
-      "commandLineArgs": "-d 0 -l ja --gpu"
+      "commandLineArgs": "-d 0 -l ja"
     }
   }
 }

@@ -16,8 +16,14 @@
 
   <ItemGroup>
     <None Include="runtimes\**\*" Pack="true" PackagePath="runtimes" />
-    <Content Include="runtimes\win-x64\native\qwen3_asr_ffi.dll" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\README.md" Pack="true" PackagePath="" />
   </ItemGroup>
+
+  <!-- Copy native DLL to output directory for project references -->
+  <Target Name="CopyNativeDll" AfterTargets="Build">
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\runtimes\win-x64\native\qwen3_asr_ffi.dll"
+          DestinationFolder="$(OutputPath)"
+          Condition="Exists('$(MSBuildProjectDirectory)\runtimes\win-x64\native\qwen3_asr_ffi.dll')" />
+  </Target>
 
 </Project>

@@ -45,6 +45,19 @@ internal static class NativeBindings
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    internal struct StreamOptionsFFI
+    {
+        public IntPtr Language;
+        public IntPtr Context;
+        public float ChunkSizeSec;
+        public int UnfixedChunkNum;
+        public int UnfixedTokenNum;
+        public float AudioWindowSec;
+        public int TextWindowTokens;
+        public int MaxNewTokens;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     internal struct TranscriptionResultFFI
     {
         public IntPtr Json;
@@ -90,6 +103,30 @@ internal static class NativeBindings
         UIntPtr sampleCount,
         uint sampleRate,
         ref TranscribeOptionsFFI options);
+
+    #endregion
+
+    #region FFI Functions - Native Streaming Transcription
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern IntPtr qwen3_asr_stream_create(
+        IntPtr handle,
+        ref StreamOptionsFFI options,
+        out IntPtr errorOut);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern TranscriptionResultFFI qwen3_asr_stream_push(
+        IntPtr streamHandle,
+        [In] float[] samples,
+        UIntPtr sampleCount,
+        uint sampleRate);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern TranscriptionResultFFI qwen3_asr_stream_finish(
+        IntPtr streamHandle);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern void qwen3_asr_stream_destroy(IntPtr streamHandle);
 
     #endregion
 

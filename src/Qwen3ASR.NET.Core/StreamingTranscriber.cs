@@ -1,12 +1,14 @@
+using System.Runtime.InteropServices;
 using System.Text;
 using Qwen3ASR.NET.Enums;
 using Qwen3ASR.NET.Models;
+using Qwen3ASR.NET.Native;
 
 namespace Qwen3ASR.NET;
 
 /// <summary>
 /// Streaming transcriber for real-time speech recognition.
-/// Implements buffering, chunking, and rolling context logic in .NET.
+/// Uses native streaming API for efficient incremental transcription.
 /// </summary>
 public sealed class StreamingTranscriber : IAsyncDisposable, IDisposable
 {
@@ -14,27 +16,17 @@ public sealed class StreamingTranscriber : IAsyncDisposable, IDisposable
 
     private readonly Qwen3Asr _asr;
     private readonly StreamOptions _options;
-    private readonly List<float> _audioBuffer;
-    private readonly List<TranscriptSegment> _segments;
-    private readonly List<TranscriptSegment> _unfixedSegments;
-    private readonly int _chunkSizeSamples;
-    private readonly int _audioWindowSamples;
+    private IntPtr _streamHandle;
     private readonly TranscriptionOptions _transcribeOptions;
 
     private bool _disposed;
     private bool _finished;
     private int _totalSamplesProcessed;
-    private string _rollingContext;
 
     /// <summary>
     /// Gets whether the stream is still active.
     /// </summary>
-    public bool IsActive => !_disposed && !_finished;
-
-    /// <summary>
-    /// Gets the number of segments processed.
-    /// </summary>
-    public int SegmentCount => _segments.Count;
+    public bool IsActive => !_disposed && !_finished && _streamHandle != IntPtr.Zero;
 
     /// <summary>
     /// Gets the total duration processed in seconds.
@@ -45,22 +37,72 @@ public sealed class StreamingTranscriber : IAsyncDisposable, IDisposable
     {
         _asr = asr ?? throw new ArgumentNullException(nameof(asr));
         _options = options;
-        _audioBuffer = new List<float>();
-        _segments = new List<TranscriptSegment>();
-        _unfixedSegments = new List<TranscriptSegment>();
-        _chunkSizeSamples = (int)(options.ChunkSizeSec * SampleRate);
-        _audioWindowSamples = options.AudioWindowSec.HasValue
-            ? (int)(options.AudioWindowSec.Value * SampleRate)
-            : 0; // 0 means no window
-        _rollingContext = options.Context ?? string.Empty;
+
+        // Create native stream
+        _streamHandle = CreateNativeStream();
+        if (_streamHandle == IntPtr.Zero)
+        {
+            throw new Qwen3AsrException("Failed to create native streaming session");
+        }
 
         _transcribeOptions = new TranscriptionOptions
         {
             Language = options.Language,
-            Context = _rollingContext,
+            Context = options.Context,
             ReturnTimestamps = false,
             MaxNewTokens = options.MaxNewTokens
         };
+    }
+
+    private IntPtr CreateNativeStream()
+    {
+        var streamOpts = new NativeBindings.StreamOptionsFFI
+        {
+            Language = IntPtr.Zero,
+            Context = IntPtr.Zero,
+            ChunkSizeSec = _options.ChunkSizeSec,
+            UnfixedChunkNum = _options.UnfixedChunkNum,
+            UnfixedTokenNum = _options.UnfixedTokenNum,
+            AudioWindowSec = _options.AudioWindowSec ?? 0f,
+            TextWindowTokens = _options.TextWindowTokens ?? 0,
+            MaxNewTokens = _options.MaxNewTokens
+        };
+
+        // Set language if specified
+        if (_options.Language != Language.Auto)
+        {
+            streamOpts.Language = Marshal.StringToHGlobalAnsi(_options.Language.ToNativeString());
+        }
+
+        // Set context if specified
+        if (!string.IsNullOrEmpty(_options.Context))
+        {
+            streamOpts.Context = Marshal.StringToHGlobalAnsi(_options.Context);
+        }
+
+        try
+        {
+            var handle = NativeBindings.qwen3_asr_stream_create(
+                _asr.Handle,
+                ref streamOpts,
+                out IntPtr errorOut);
+
+            if (handle == IntPtr.Zero && errorOut != IntPtr.Zero)
+            {
+                var errorMessage = Marshal.PtrToStringUTF8(errorOut);
+                NativeBindings.qwen3_asr_free_string(errorOut);
+                throw new Qwen3AsrException($"Failed to create stream: {errorMessage}");
+            }
+
+            return handle;
+        }
+        finally
+        {
+            if (streamOpts.Language != IntPtr.Zero)
+                Marshal.FreeHGlobal(streamOpts.Language);
+            if (streamOpts.Context != IntPtr.Zero)
+                Marshal.FreeHGlobal(streamOpts.Context);
+        }
     }
 
     /// <summary>
@@ -81,28 +123,23 @@ public sealed class StreamingTranscriber : IAsyncDisposable, IDisposable
         ArgumentNullException.ThrowIfNull(audioSamples);
 
         if (audioSamples.Length == 0)
-            return BuildPartialResult();
+            return GetPartialResult();
 
-        // Add to audio buffer
-        _audioBuffer.AddRange(audioSamples);
+        cancellationToken.ThrowIfCancellationRequested();
 
-        // Apply audio window if configured (rolling context)
-        if (_audioWindowSamples > 0 && _audioBuffer.Count > _audioWindowSamples)
+        // Run native API call on thread pool
+        return await Task.Run(() =>
         {
-            int samplesToRemove = _audioBuffer.Count - _audioWindowSamples;
-            _audioBuffer.RemoveRange(0, samplesToRemove);
-        }
+            var result = NativeBindings.qwen3_asr_stream_push(
+                _streamHandle,
+                audioSamples,
+                (UIntPtr)audioSamples.Length,
+                SampleRate);
 
-        // Process complete chunks
-        while (_audioBuffer.Count >= _chunkSizeSamples)
-        {
-            var chunk = _audioBuffer.Take(_chunkSizeSamples).ToArray();
-            _audioBuffer.RemoveRange(0, _chunkSizeSamples);
+            _totalSamplesProcessed += audioSamples.Length;
 
-            await ProcessChunkAsync(chunk, cancellationToken).ConfigureAwait(false);
-        }
-
-        return BuildPartialResult();
+            return ProcessNativeResult(result, isPartial: true);
+        }, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -112,7 +149,14 @@ public sealed class StreamingTranscriber : IAsyncDisposable, IDisposable
     public TranscriptionResult GetPartialResult()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        return BuildPartialResult();
+
+        // Return empty partial result (native API returns partial on push)
+        return new TranscriptionResult
+        {
+            Text = string.Empty,
+            Language = _options.Language.ToNativeString(),
+            IsPartial = true
+        };
     }
 
     /// <summary>
@@ -129,148 +173,61 @@ public sealed class StreamingTranscriber : IAsyncDisposable, IDisposable
 
         _finished = true;
 
-        // Process remaining buffer
-        if (_audioBuffer.Count > 0)
-        {
-            var remainingChunk = _audioBuffer.ToArray();
-            _audioBuffer.Clear();
-            await ProcessChunkAsync(remainingChunk, cancellationToken).ConfigureAwait(false);
-        }
+        cancellationToken.ThrowIfCancellationRequested();
 
-        // Fix all remaining unfixed segments
-        foreach (var segment in _unfixedSegments)
+        // Run native API call on thread pool
+        return await Task.Run(() =>
         {
-            segment.IsFixed = true;
-            _segments.Add(segment);
-        }
-        _unfixedSegments.Clear();
-
-        return BuildFinalResult();
+            var result = NativeBindings.qwen3_asr_stream_finish(_streamHandle);
+            return ProcessNativeResult(result, isPartial: false);
+        }, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task ProcessChunkAsync(float[] chunk, CancellationToken cancellationToken)
+    private TranscriptionResult ProcessNativeResult(NativeBindings.TranscriptionResultFFI ffiResult, bool isPartial)
     {
-        var startTime = (float)_totalSamplesProcessed / SampleRate;
-        var endTime = startTime + (float)chunk.Length / SampleRate;
-
         try
         {
-            // Update context with rolling text window
-            UpdateRollingContext();
-
-            // Transcribe the chunk
-            var result = await _asr.TranscribeAsync(chunk, SampleRate, _transcribeOptions, cancellationToken)
-                .ConfigureAwait(false);
-
-            _totalSamplesProcessed += chunk.Length;
-
-            if (!string.IsNullOrEmpty(result.Text))
+            if (ffiResult.Code != NativeBindings.ResultCode.Success)
             {
-                var newSegment = new TranscriptSegment
+                var errorMessage = ffiResult.Error != IntPtr.Zero
+                    ? Marshal.PtrToStringUTF8(ffiResult.Error) ?? "Unknown error"
+                    : $"Error code: {ffiResult.Code}";
+                throw new Qwen3AsrException($"Transcription failed: {errorMessage}");
+            }
+
+            if (ffiResult.Json == IntPtr.Zero)
+            {
+                return new TranscriptionResult
                 {
-                    Text = result.Text,
-                    StartTime = startTime,
-                    EndTime = endTime,
-                    IsFixed = false
+                    Text = string.Empty,
+                    Language = _options.Language.ToNativeString(),
+                    IsPartial = isPartial
                 };
-
-                // Add to unfixed segments
-                _unfixedSegments.Add(newSegment);
-
-                // Manage unfixed segments - fix old ones based on UnfixedChunkNum
-                while (_unfixedSegments.Count > _options.UnfixedChunkNum)
-                {
-                    var segmentToFix = _unfixedSegments[0];
-                    _unfixedSegments.RemoveAt(0);
-                    segmentToFix.IsFixed = true;
-                    _segments.Add(segmentToFix);
-                }
-
-                // Update rolling context for next chunk
-                UpdateRollingContext();
             }
-        }
-        catch (Qwen3AsrException)
-        {
-            // Re-throw transcription errors
-            throw;
-        }
-    }
 
-    private void UpdateRollingContext()
-    {
-        // Build context from fixed segments and apply text window
-        var allText = new StringBuilder();
-
-        // Add original context if present
-        if (!string.IsNullOrEmpty(_options.Context))
-        {
-            allText.Append(_options.Context);
-            allText.Append(' ');
-        }
-
-        // Add fixed segments
-        foreach (var segment in _segments)
-        {
-            allText.Append(segment.Text);
-            allText.Append(' ');
-        }
-
-        // Add unfixed segments
-        foreach (var segment in _unfixedSegments)
-        {
-            allText.Append(segment.Text);
-            allText.Append(' ');
-        }
-
-        var fullText = allText.ToString().Trim();
-
-        // Apply text window (token-based approximation: ~4 chars per token)
-        if (_options.TextWindowTokens.HasValue && _options.TextWindowTokens.Value > 0)
-        {
-            int maxChars = _options.TextWindowTokens.Value * 4;
-            if (fullText.Length > maxChars)
+            var json = Marshal.PtrToStringUTF8(ffiResult.Json);
+            if (string.IsNullOrEmpty(json))
             {
-                fullText = fullText[^maxChars..];
+                return new TranscriptionResult
+                {
+                    Text = string.Empty,
+                    Language = _options.Language.ToNativeString(),
+                    IsPartial = isPartial
+                };
             }
+
+            return System.Text.Json.JsonSerializer.Deserialize<TranscriptionResult>(json)
+                ?? new TranscriptionResult
+                {
+                    Text = string.Empty,
+                    Language = _options.Language.ToNativeString(),
+                    IsPartial = isPartial
+                };
         }
-
-        _rollingContext = fullText;
-        _transcribeOptions.Context = _rollingContext;
-    }
-
-    private TranscriptionResult BuildPartialResult()
-    {
-        // Combine fixed and unfixed segments
-        var allSegments = _segments.Concat(_unfixedSegments).ToList();
-        var text = string.Join(" ", allSegments.Select(s => s.Text));
-
-        return new TranscriptionResult
+        finally
         {
-            Text = text,
-            Language = _options.Language.ToNativeString(),
-            IsPartial = true
-        };
-    }
-
-    private TranscriptionResult BuildFinalResult()
-    {
-        var text = string.Join(" ", _segments.Select(s => s.Text));
-
-        var timestamps = _segments.Select(s => new Timestamp
-        {
-            Start = s.StartTime,
-            End = s.EndTime,
-            Text = s.Text
-        }).ToList();
-
-        return new TranscriptionResult
-        {
-            Text = text,
-            Language = _options.Language.ToNativeString(),
-            Timestamps = timestamps,
-            IsPartial = false
-        };
+            NativeBindings.qwen3_asr_free_result(ref ffiResult);
+        }
     }
 
     /// <summary>
@@ -281,9 +238,12 @@ public sealed class StreamingTranscriber : IAsyncDisposable, IDisposable
         if (_disposed)
             return;
 
-        _audioBuffer.Clear();
-        _segments.Clear();
-        _unfixedSegments.Clear();
+        if (_streamHandle != IntPtr.Zero)
+        {
+            NativeBindings.qwen3_asr_stream_destroy(_streamHandle);
+            _streamHandle = IntPtr.Zero;
+        }
+
         _disposed = true;
         GC.SuppressFinalize(this);
     }
@@ -303,13 +263,5 @@ public sealed class StreamingTranscriber : IAsyncDisposable, IDisposable
     ~StreamingTranscriber()
     {
         Dispose();
-    }
-
-    private class TranscriptSegment
-    {
-        public string Text { get; init; } = string.Empty;
-        public float StartTime { get; init; }
-        public float EndTime { get; init; }
-        public bool IsFixed { get; set; }
     }
 }

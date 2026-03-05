@@ -252,8 +252,9 @@ class Program
         // Processing loop
         var processingTask = Task.Run(async () =>
         {
-            var chunkSize = (int)(sampleRate * 1.0f); // 1 second chunks
-            var processInterval = TimeSpan.FromMilliseconds(500);
+            // Faster real-time response with smaller chunks
+            var chunkSize = (int)(sampleRate * 0.3f); // 0.3 second chunks
+            var processInterval = TimeSpan.FromMilliseconds(100); // Check every 100ms
 
             while (!cancellationTokenSource.Token.IsCancellationRequested)
             {
@@ -265,26 +266,38 @@ class Program
 
                     if (vad != null)
                     {
-                        // Get buffered speech from VAD
-                        var bufferedSamples = vad.BufferedSampleCount;
-                        if (bufferedSamples < chunkSize)
-                            continue;
+                        // Get buffered audio (includes silence as zeros)
+                        // Use effective buffer count to skip if all silence
+                        var bufferedSamples = vad.GetEffectiveBufferCount();
 
-                        chunkToProcess = vad.Flush();
-                        if (chunkToProcess == null || chunkToProcess.Length == 0)
-                            continue;
+                        // Send when we have enough samples with actual speech
+                        if (bufferedSamples >= chunkSize)
+                        {
+                            // Get up to chunkSize samples
+                            var allSamples = vad.PeekBuffer();
+                            if (allSamples != null && allSamples.Length > 0)
+                            {
+                                var takeCount = Math.Min(chunkSize, allSamples.Length);
+                                chunkToProcess = new float[takeCount];
+                                Array.Copy(allSamples, chunkToProcess, takeCount);
+                                vad.ConsumeSamples(takeCount);
+                            }
+                        }
                     }
                     else
                     {
                         lock (bufferLock)
                         {
-                            if (audioBuffer.Count < chunkSize)
-                                continue;
-
-                            chunkToProcess = audioBuffer.ToArray();
-                            audioBuffer.Clear();
+                            if (audioBuffer.Count >= chunkSize)
+                            {
+                                chunkToProcess = audioBuffer.GetRange(0, chunkSize).ToArray();
+                                audioBuffer.RemoveRange(0, chunkSize);
+                            }
                         }
                     }
+
+                    if (chunkToProcess == null || chunkToProcess.Length == 0)
+                        continue;
 
                     // Push audio to streaming transcriber
                     var partial = await stream.PushAsync(chunkToProcess);
@@ -325,9 +338,35 @@ class Program
         Console.WriteLine();
         Console.WriteLine("Finalizing transcription...");
 
+        // Flush remaining buffer before finishing
         if (vad != null)
         {
-            Console.WriteLine($"VAD Stats: Silence filtered = {vad.SilenceDuration.TotalSeconds:F1}s / Total = {vad.TotalDuration.TotalSeconds:F1}s");
+            Console.WriteLine($"VAD Stats: Silence = {vad.SilenceDuration.TotalSeconds:F1}s / Total = {vad.TotalDuration.TotalSeconds:F1}s");
+
+            // Send any remaining buffered audio
+            var remainingSamples = vad.Flush();
+            if (remainingSamples != null && remainingSamples.Length > 0)
+            {
+                Console.WriteLine($"Flushing remaining {remainingSamples.Length / (float)sampleRate:F2}s of audio...");
+                await stream.PushAsync(remainingSamples);
+            }
+        }
+        else
+        {
+            float[]? remainingSamples = null;
+            lock (bufferLock)
+            {
+                if (audioBuffer.Count > 0)
+                {
+                    remainingSamples = audioBuffer.ToArray();
+                    audioBuffer.Clear();
+                }
+            }
+            if (remainingSamples != null && remainingSamples.Length > 0)
+            {
+                Console.WriteLine($"Flushing remaining {remainingSamples.Length / (float)sampleRate:F2}s of audio...");
+                await stream.PushAsync(remainingSamples);
+            }
         }
 
         var final = await stream.FinishAsync();

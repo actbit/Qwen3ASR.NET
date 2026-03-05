@@ -1,14 +1,14 @@
 //! Qwen3-ASR FFI - Thin C-compatible wrapper for qwen3-asr-rs
 //!
 //! This crate provides minimal C-compatible bindings for the Qwen3-ASR library.
-//! All business logic (streaming, buffering, async) should be implemented on the .NET side.
+//! Supports native streaming transcription via stream API.
 
 use std::ffi::{CStr, CString};
 use std::ptr;
 use std::slice;
 
 use candle_core::Device;
-use qwen3_asr::{AudioInput, LoadOptions, Qwen3Asr, TranscribeOptions, Batch};
+use qwen3_asr::{AudioInput, LoadOptions, Qwen3Asr, TranscribeOptions, Batch, StreamOptions, AsrStream};
 use serde::{Deserialize, Serialize};
 
 // ============================================================================
@@ -17,6 +17,11 @@ use serde::{Deserialize, Serialize};
 
 /// Opaque handle to an ASR instance
 pub type Qwen3AsrHandle = *mut Qwen3Asr;
+
+/// Opaque handle to a streaming transcription session
+/// Uses raw pointer with manual lifetime management (caller must ensure model outlives stream)
+/// Wrapped in Option to allow taking ownership during finish()
+pub type Qwen3AsrStreamHandle = *mut Option<AsrStream<'static>>;
 
 /// Device type for inference
 #[repr(C)]
@@ -59,6 +64,19 @@ pub struct Qwen3AsrTranscribeOptions {
     pub max_batch_size: libc::c_int,
     pub chunk_max_sec: libc::c_float,
     pub bucket_by_length: bool,
+}
+
+/// Stream options for native streaming transcription
+#[repr(C)]
+pub struct Qwen3AsrStreamOptions {
+    pub language: *const libc::c_char,
+    pub context: *const libc::c_char,
+    pub chunk_size_sec: libc::c_float,
+    pub unfixed_chunk_num: libc::c_int,
+    pub unfixed_token_num: libc::c_int,
+    pub audio_window_sec: libc::c_float,
+    pub text_window_tokens: libc::c_int,
+    pub max_new_tokens: libc::c_int,
 }
 
 /// Transcription result (JSON format for flexibility)
@@ -200,12 +218,11 @@ pub unsafe extern "C" fn qwen3_asr_load_ex(
         }
     };
 
-    // Build load options with optional forced aligner
-    let forced_aligner = parse_c_string(forced_aligner_path);
-    let load_opts = LoadOptions {
-        forced_aligner: forced_aligner.as_deref(),
-        ..Default::default()
-    };
+    // Build load options
+    // Note: forced_aligner is no longer supported in the current qwen3-asr-rs API
+    // The forced_aligner_path parameter is kept for API compatibility but is ignored
+    let _forced_aligner = parse_c_string(forced_aligner_path);
+    let load_opts = LoadOptions::default();
 
     match Qwen3Asr::from_pretrained(&model_path, &candle_device, &load_opts) {
         Ok(model) => Box::into_raw(Box::new(model)),
@@ -326,6 +343,169 @@ pub unsafe extern "C" fn qwen3_asr_transcribe(
 }
 
 // ============================================================================
+// FFI Functions - Native Streaming Transcription
+// ============================================================================
+
+/// Create a streaming transcription session
+///
+/// Returns a stream handle that must be destroyed with qwen3_asr_stream_destroy.
+/// WARNING: The caller must ensure the model handle outlives the stream handle.
+#[no_mangle]
+pub unsafe extern "C" fn qwen3_asr_stream_create(
+    handle: Qwen3AsrHandle,
+    options: *const Qwen3AsrStreamOptions,
+    error_out: *mut *mut libc::c_char,
+) -> Qwen3AsrStreamHandle {
+    if handle.is_null() {
+        if !error_out.is_null() {
+            *error_out = to_c_string("Handle is null".to_string());
+        }
+        return ptr::null_mut();
+    }
+
+    // Build stream options
+    let opts = if options.is_null() {
+        Qwen3AsrStreamOptions {
+            language: ptr::null(),
+            context: ptr::null(),
+            chunk_size_sec: 0.0,
+            unfixed_chunk_num: 0,
+            unfixed_token_num: 0,
+            audio_window_sec: 0.0,
+            text_window_tokens: 0,
+            max_new_tokens: 0,
+        }
+    } else {
+        (*options).clone()
+    };
+
+    let language = parse_c_string(opts.language);
+    let context = parse_c_string(opts.context).unwrap_or_default();
+
+    let stream_opts = StreamOptions {
+        language,
+        context,
+        chunk_size_sec: if opts.chunk_size_sec > 0.0 { opts.chunk_size_sec } else { 2.0 },
+        unfixed_chunk_num: if opts.unfixed_chunk_num > 0 { opts.unfixed_chunk_num as usize } else { 2 },
+        unfixed_token_num: if opts.unfixed_token_num > 0 { opts.unfixed_token_num as usize } else { 5 },
+        audio_window_sec: if opts.audio_window_sec > 0.0 { Some(opts.audio_window_sec) } else { None },
+        text_window_tokens: if opts.text_window_tokens > 0 { Some(opts.text_window_tokens as usize) } else { None },
+        max_new_tokens: if opts.max_new_tokens > 0 { opts.max_new_tokens as usize } else { 256 },
+    };
+
+    let model = &*handle;
+    match model.start_stream(stream_opts) {
+        Ok(stream) => {
+            // SAFETY: We transmute the lifetime to 'static. This is safe as long as:
+            // 1. The model handle outlives the stream handle
+            // 2. The stream handle is properly destroyed before the model
+            // The caller is responsible for ensuring these invariants.
+            let stream: AsrStream<'static> = std::mem::transmute(stream);
+            Box::into_raw(Box::new(Some(stream))) as Qwen3AsrStreamHandle
+        }
+        Err(e) => {
+            if !error_out.is_null() {
+                *error_out = to_c_string(format!("Failed to create stream: {}", e));
+            }
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Push audio chunk to the streaming transcription session
+///
+/// Returns partial transcription result as JSON
+#[no_mangle]
+pub unsafe extern "C" fn qwen3_asr_stream_push(
+    stream_handle: Qwen3AsrStreamHandle,
+    samples: *const libc::c_float,
+    sample_count: libc::size_t,
+    sample_rate: libc::c_uint,
+) -> Qwen3AsrResult {
+    if stream_handle.is_null() {
+        return error_result(Qwen3AsrResultCode::InvalidHandle, "Stream handle is null");
+    }
+
+    if samples.is_null() && sample_count > 0 {
+        return error_result(Qwen3AsrResultCode::InvalidParameter, "samples is null but count > 0");
+    }
+
+    let stream_opt = &mut *stream_handle;
+    let stream = match stream_opt {
+        Some(s) => s,
+        None => return error_result(Qwen3AsrResultCode::InvalidHandle, "Stream already finished"),
+    };
+
+    let audio_slice = if sample_count == 0 {
+        &[]
+    } else {
+        slice::from_raw_parts(samples, sample_count)
+    };
+
+    let audio_input = AudioInput::Waveform {
+        samples: audio_slice,
+        sample_rate,
+    };
+
+    match stream.push_audio_chunk(&audio_input) {
+        Ok(Some(partial)) => {
+            success_result(TranscriptionJson {
+                text: partial.text,
+                language: partial.language,
+                timestamps: partial.timestamps,
+            })
+        }
+        Ok(None) => {
+            // No partial result available yet
+            success_result(TranscriptionJson {
+                text: String::new(),
+                language: String::new(),
+                timestamps: None,
+            })
+        }
+        Err(e) => error_result(Qwen3AsrResultCode::InferenceError, &e.to_string()),
+    }
+}
+
+/// Finish the streaming transcription session and get final result
+///
+/// After calling this, the stream handle is still valid and must be destroyed
+/// with qwen3_asr_stream_destroy, but the stream is consumed and cannot be used again.
+#[no_mangle]
+pub unsafe extern "C" fn qwen3_asr_stream_finish(
+    stream_handle: Qwen3AsrStreamHandle,
+) -> Qwen3AsrResult {
+    if stream_handle.is_null() {
+        return error_result(Qwen3AsrResultCode::InvalidHandle, "Stream handle is null");
+    }
+
+    let stream_opt = &mut *stream_handle;
+    let stream = match stream_opt.take() {
+        Some(s) => s,
+        None => return error_result(Qwen3AsrResultCode::InvalidHandle, "Stream already finished"),
+    };
+
+    match stream.finish() {
+        Ok(final_result) => {
+            success_result(TranscriptionJson {
+                text: final_result.text,
+                language: final_result.language,
+                timestamps: final_result.timestamps,
+            })
+        }
+        Err(e) => error_result(Qwen3AsrResultCode::InferenceError, &e.to_string()),
+    }
+}
+
+/// Destroy a streaming transcription session
+#[no_mangle]
+pub unsafe extern "C" fn qwen3_asr_stream_destroy(stream_handle: Qwen3AsrStreamHandle) {
+    if !stream_handle.is_null() {
+        drop(Box::from_raw(stream_handle));
+    }
+}
+
+// ============================================================================
 // FFI Functions - Memory Management
 // ============================================================================
 
@@ -375,6 +555,21 @@ impl Clone for Qwen3AsrTranscribeOptions {
             max_batch_size: self.max_batch_size,
             chunk_max_sec: self.chunk_max_sec,
             bucket_by_length: self.bucket_by_length,
+        }
+    }
+}
+
+impl Clone for Qwen3AsrStreamOptions {
+    fn clone(&self) -> Self {
+        Self {
+            language: self.language,
+            context: self.context,
+            chunk_size_sec: self.chunk_size_sec,
+            unfixed_chunk_num: self.unfixed_chunk_num,
+            unfixed_token_num: self.unfixed_token_num,
+            audio_window_sec: self.audio_window_sec,
+            text_window_tokens: self.text_window_tokens,
+            max_new_tokens: self.max_new_tokens,
         }
     }
 }
