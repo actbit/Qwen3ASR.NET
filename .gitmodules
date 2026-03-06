@@ -1,0 +1,6 @@
+[submodule "patches/qwen3-asr-rs"]
+	path = patches/qwen3-asr-rs
+	url = https://github.com/lumosimmo/qwen3-asr-rs.git
+[submodule "patches/candle"]
+	path = patches/candle
+	url = https://github.com/huggingface/candle.git

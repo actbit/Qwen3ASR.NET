@@ -1,0 +1,93 @@
+diff --git a/qwen3_asr/src/model/audio_encoder.rs b/qwen3_asr/src/model/audio_encoder.rs
+index 775967c..bdb2176 100644
+--- a/qwen3_asr/src/model/audio_encoder.rs
++++ b/qwen3_asr/src/model/audio_encoder.rs
+@@ -23,8 +23,9 @@ use candle_flash_attn::flash_attn_varlen;
+ 
+ const LAYER_NORM_EPS: f64 = 1e-5;
+ 
+-fn maybe_contiguous_for_metal(x: Tensor) -> Result<Tensor> {
+-    if x.device().is_metal() {
++fn maybe_contiguous_for_gpu(x: Tensor) -> Result<Tensor> {
++    // Both Metal and CUDA require contiguous tensors for matmul operations
++    if x.device().is_metal() || x.device().is_cuda() {
+         x.contiguous()
+     } else {
+         Ok(x)
+@@ -313,13 +314,13 @@ impl AudioAttention {
+         let k = k.transpose(0, 1)?.unsqueeze(0)?; // (1, h, s, d)
+         let v = v.transpose(0, 1)?.unsqueeze(0)?; // (1, h, s, d)
+ 
+-        // Metal GEMM kernels only support contiguous (or simple transposed) layouts.
++        // GPU (Metal/CUDA) GEMM kernels only support contiguous (or simple transposed) layouts.
+         // These tensors are produced via reshapes/transposes that yield strided views,
+-        // so materialize contiguous buffers when running on Metal.
+-        let q = maybe_contiguous_for_metal(q)?;
+-        let v = maybe_contiguous_for_metal(v)?;
++        // so materialize contiguous buffers when running on GPU.
++        let q = maybe_contiguous_for_gpu(q)?;
++        let v = maybe_contiguous_for_gpu(v)?;
+ 
+-        let k_t = maybe_contiguous_for_metal(k.transpose(2, 3)?)?; // (1, h, d, s)
++        let k_t = maybe_contiguous_for_gpu(k.transpose(2, 3)?)?; // (1, h, d, s)
+         let attn_weights = q.matmul(&k_t)?.affine(self.scaling, 0.0)?;
+         let attn_weights = candle_nn::ops::softmax_last_dim(&attn_weights)?;
+ 
+diff --git a/qwen3_asr/src/model/thinker_text.rs b/qwen3_asr/src/model/thinker_text.rs
+index ed7cc48..2d8fbbc 100644
+--- a/qwen3_asr/src/model/thinker_text.rs
++++ b/qwen3_asr/src/model/thinker_text.rs
+@@ -19,6 +19,15 @@ use candle_core::{DType, Device};
+ #[cfg(feature = "flash-attn")]
+ use candle_flash_attn::{flash_attn, flash_attn_varlen};
+ 
++fn maybe_contiguous_for_gpu(x: Tensor) -> Result<Tensor> {
++    // Both Metal and CUDA require contiguous tensors for matmul operations
++    if x.device().is_metal() || x.device().is_cuda() {
++        x.contiguous()
++    } else {
++        Ok(x)
++    }
++}
++
+ #[cfg(feature = "flash-attn")]
+ fn seqlens_from_left_padded_attention_mask(mask: &Tensor, seq_len: usize) -> Result<Vec<usize>> {
+     let (batch, t2) = mask.dims2()?;
+@@ -383,7 +392,9 @@ impl ThinkerTextAttention {
+         let k = attention::repeat_kv(&k, self.num_key_value_groups)?;
+         let v = attention::repeat_kv(&v, self.num_key_value_groups)?;
+ 
+-        let k_t = k.transpose(2, 3)?; // (b, h, d, s)
++        // GPU (Metal/CUDA) requires contiguous tensors for matmul
++        let q = maybe_contiguous_for_gpu(q)?;
++        let k_t = maybe_contiguous_for_gpu(k.transpose(2, 3)?)?; // (b, h, d, s)
+         let mut attn_weights = q.matmul(&k_t)?.affine(self.scaling, 0.0)?;
+ 
+         if let Some(mask) = attention_mask {
+@@ -391,6 +402,7 @@ impl ThinkerTextAttention {
+         }
+ 
+         let attn_weights = candle_nn::ops::softmax_last_dim(&attn_weights)?;
++        let v = maybe_contiguous_for_gpu(v)?;
+         let attn_output = attn_weights.matmul(&v)?; // (b, h, s, d)
+         let attn_output = attn_output.transpose(1, 2)?; // (b, s, h, d)
+         let attn_output =
+@@ -610,7 +622,9 @@ impl ThinkerTextAttention {
+         let k = attention::repeat_kv(&k, self.num_key_value_groups)?;
+         let v = attention::repeat_kv(&v, self.num_key_value_groups)?;
+ 
+-        let k_t = k.transpose(2, 3)?; // (b, h, d, s)
++        // GPU (Metal/CUDA) requires contiguous tensors for matmul
++        let q = maybe_contiguous_for_gpu(q)?;
++        let k_t = maybe_contiguous_for_gpu(k.transpose(2, 3)?)?; // (b, h, d, s)
+         let mut attn_weights = q.matmul(&k_t)?.affine(self.scaling, 0.0)?;
+ 
+         if let Some(mask) = attention_mask {
+@@ -618,6 +632,7 @@ impl ThinkerTextAttention {
+         }
+ 
+         let attn_weights = candle_nn::ops::softmax_last_dim(&attn_weights)?;
++        let v = maybe_contiguous_for_gpu(v)?;
+         let attn_output = attn_weights.matmul(&v)?; // (b, h, s, d)
+         let attn_output = attn_output.transpose(1, 2)?; // (b, s, h, d)
+         let attn_output =
