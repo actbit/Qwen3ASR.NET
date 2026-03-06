@@ -5,6 +5,8 @@
 
 **Qwen3ASR.NET** is a .NET wrapper for [qwen3-asr-rs](https://github.com/lumosimmo/qwen3-asr-rs), a Rust/Candle implementation of [Qwen3-Audio](https://github.com/QwenLM/Qwen3-Audio) (Alibaba's state-of-the-art speech recognition model).
 
+**English** | [日本語](README.ja.md)
+
 ## Features
 
 - 🎯 **High Accuracy** - Based on Qwen3-ASR model
