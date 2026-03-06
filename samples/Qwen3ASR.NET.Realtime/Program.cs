@@ -24,7 +24,8 @@ class Program
         int? deviceIndex = null;
         bool useVad = true;  // VAD enabled by default
         float vadThreshold = 0.01f;
-        DeviceType deviceType = DeviceType.Cpu;
+        DeviceType deviceType = DeviceType.Cpu;  // CPU by default
+        int? gpuIndex = null;  // GPU device index for CUDA
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -52,12 +53,18 @@ class Program
                 case "--vad-threshold":
                     vadThreshold = float.Parse(args[++i]);
                     break;
+                case "--cpu":
+                    deviceType = DeviceType.Cpu;
+                    break;
                 case "--gpu":
                 case "--cuda":
                     deviceType = DeviceType.Cuda;
                     break;
                 case "--metal":
                     deviceType = DeviceType.Metal;
+                    break;
+                case "--gpu-index":
+                    gpuIndex = int.Parse(args[++i]);
                     break;
                 case "-h":
                 case "--help":
@@ -68,6 +75,13 @@ class Program
 
         try
         {
+            // Set GPU index if specified
+            if (gpuIndex.HasValue && deviceType == DeviceType.Cuda)
+            {
+                Environment.SetEnvironmentVariable("CUDA_VISIBLE_DEVICES", gpuIndex.Value.ToString());
+                Console.WriteLine($"Using GPU {gpuIndex.Value}");
+            }
+
             // Load model
             Console.WriteLine($"Loading model: {modelPath}");
             if (!string.IsNullOrEmpty(forcedAlignerPath))
@@ -107,17 +121,19 @@ class Program
         Console.WriteLine("  -a, --aligner <path>    Forced aligner model for timestamps (e.g., Qwen/Qwen3-ForcedAligner-0.6B)");
         Console.WriteLine("  -l, --language <lang>   Language code (Japanese, English, Chinese, etc.)");
         Console.WriteLine("  -d, --device <index>    Audio input device index");
-        Console.WriteLine("  --gpu, --cuda           Use CUDA GPU for inference (requires NVIDIA GPU)");
+        Console.WriteLine("  --cpu                   Force CPU inference");
+        Console.WriteLine("  --gpu, --cuda           Use CUDA GPU for inference");
+        Console.WriteLine("  --gpu-index <index>     GPU device index (0, 1, etc.)");
         Console.WriteLine("  --metal                 Use Metal GPU for inference (macOS only)");
         Console.WriteLine("  --no-vad                Disable Voice Activity Detection");
         Console.WriteLine("  --vad-threshold <val>   VAD energy threshold (default: 0.01)");
         Console.WriteLine("  -h, --help              Show this help message");
         Console.WriteLine();
         Console.WriteLine("Examples:");
-        Console.WriteLine("  Qwen3ASR.NET.Realtime");
+        Console.WriteLine("  Qwen3ASR.NET.Realtime              # Use CUDA (falls back to CPU if unavailable)");
+        Console.WriteLine("  Qwen3ASR.NET.Realtime --cpu        # Force CPU");
         Console.WriteLine("  Qwen3ASR.NET.Realtime -l Japanese");
         Console.WriteLine("  Qwen3ASR.NET.Realtime -l English -d 1");
-        Console.WriteLine("  Qwen3ASR.NET.Realtime --gpu");
         Console.WriteLine("  Qwen3ASR.NET.Realtime -a Qwen/Qwen3-ForcedAligner-0.6B");
         Console.WriteLine("  Qwen3ASR.NET.Realtime --no-vad");
     }
@@ -192,13 +208,17 @@ class Program
         // Create PvRecorder
         using var recorder = PvRecorder.Create(frameLength: frameLength, deviceIndex: selectedDevice);
 
-        // Start streaming transcription
+        // Start streaming transcription with rolling window
         await using var stream = asr.StartStream(new StreamOptions
         {
             Language = language ?? Language.Auto,
-            ChunkSizeSec = 1.0f,
+            ChunkSizeSec = 0.5f,
             UnfixedChunkNum = 2,
-            MaxNewTokens = 256
+            UnfixedTokenNum = 5,
+            MaxNewTokens = 128,  // Reduced for lower memory usage
+            // Rolling window - smaller for faster processing and lower memory
+            AudioWindowSec = 3.0f,  // Reduced from 5.0f
+            TextWindowTokens = 20   // Reduced from 30
         });
 
         var audioBuffer = new List<float>();
@@ -252,16 +272,14 @@ class Program
         // Processing loop
         var processingTask = Task.Run(async () =>
         {
-            // Faster real-time response with smaller chunks
-            var chunkSize = (int)(sampleRate * 0.3f); // 0.3 second chunks
-            var processInterval = TimeSpan.FromMilliseconds(100); // Check every 100ms
+            // Fast processing with small chunks
+            var chunkSize = (int)(sampleRate * 0.2f); // 0.2 second chunks
+            var minWaitInterval = TimeSpan.FromMilliseconds(20); // Very short wait
 
             while (!cancellationTokenSource.Token.IsCancellationRequested)
             {
                 try
                 {
-                    await Task.Delay(processInterval, cancellationTokenSource.Token);
-
                     float[]? chunkToProcess = null;
 
                     if (vad != null)
@@ -297,7 +315,11 @@ class Program
                     }
 
                     if (chunkToProcess == null || chunkToProcess.Length == 0)
+                    {
+                        // No data available, wait a bit
+                        await Task.Delay(minWaitInterval, cancellationTokenSource.Token);
                         continue;
+                    }
 
                     // Push audio to streaming transcriber
                     var partial = await stream.PushAsync(chunkToProcess);
@@ -309,6 +331,8 @@ class Program
                         Console.Write($"\r{new string(' ', lastPartialText.Length)}\r{partial.Text}");
                         lastPartialText = partial.Text;
                     }
+
+                    // Don't wait - immediately process next chunk if available
                 }
                 catch (OperationCanceledException)
                 {

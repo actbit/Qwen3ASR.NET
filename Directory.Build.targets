@@ -60,7 +60,53 @@
 
     <!-- Skip Rust build if requested -->
     <SkipRustBuild Condition="'$(SkipRustBuild)' == ''">false</SkipRustBuild>
+
+    <!-- Patch files and submodule directories -->
+    <Qwen3AsrPatchFile>$(MSBuildThisFileDirectory)patches\qwen3-asr-cuda.patch</Qwen3AsrPatchFile>
+    <Qwen3AsrSubmoduleDir>$(MSBuildThisFileDirectory)patches\qwen3-asr-rs</Qwen3AsrSubmoduleDir>
+    <CandlePatchFile>$(MSBuildThisFileDirectory)patches\candle-kernels-skip-moe.patch</CandlePatchFile>
+    <CandleSubmoduleDir>$(MSBuildThisFileDirectory)patches\candle</CandleSubmoduleDir>
   </PropertyGroup>
+
+  <!-- Apply patches to submodules before building -->
+  <Target Name="ApplySubmodulePatches"
+          BeforeTargets="BuildRustLibrary"
+          Condition="'$(_SkipNativeBuild)' != 'true' AND '$(SkipRustBuild)' != 'true'">
+
+    <Message Importance="high" Text="Applying patches to submodules..." />
+
+    <!-- Apply qwen3-asr-rs patch (CUDA contiguous tensor fix) -->
+    <Exec Command="git -C &quot;$(Qwen3AsrSubmoduleDir)&quot; apply --check &quot;$(Qwen3AsrPatchFile)&quot; 2&gt;nul"
+          ContinueOnError="true">
+      <Output TaskParameter="ExitCode" PropertyName="Qwen3PatchCheckExitCode" />
+    </Exec>
+
+    <Exec Command="git -C &quot;$(Qwen3AsrSubmoduleDir)&quot; apply &quot;$(Qwen3AsrPatchFile)&quot;"
+          Condition="'$(Qwen3PatchCheckExitCode)' == '0'">
+      <Output TaskParameter="ExitCode" PropertyName="Qwen3PatchApplyExitCode" />
+    </Exec>
+
+    <Message Importance="high" Text="Applied qwen3-asr-rs CUDA patch"
+             Condition="'$(Qwen3PatchCheckExitCode)' == '0'" />
+    <Message Importance="low" Text="qwen3-asr-rs patch already applied or not needed"
+             Condition="'$(Qwen3PatchCheckExitCode)' != '0'" />
+
+    <!-- Apply candle-kernels patch (skip MOE for broader GPU support) -->
+    <Exec Command="git -C &quot;$(CandleSubmoduleDir)&quot; apply --check &quot;$(CandlePatchFile)&quot; 2&gt;nul"
+          ContinueOnError="true">
+      <Output TaskParameter="ExitCode" PropertyName="CandlePatchCheckExitCode" />
+    </Exec>
+
+    <Exec Command="git -C &quot;$(CandleSubmoduleDir)&quot; apply &quot;$(CandlePatchFile)&quot;"
+          Condition="'$(CandlePatchCheckExitCode)' == '0'">
+      <Output TaskParameter="ExitCode" PropertyName="CandlePatchApplyExitCode" />
+    </Exec>
+
+    <Message Importance="high" Text="Applied candle-kernels MOE skip patch"
+             Condition="'$(CandlePatchCheckExitCode)' == '0'" />
+    <Message Importance="low" Text="candle-kernels patch already applied or not needed"
+             Condition="'$(CandlePatchCheckExitCode)' != '0'" />
+  </Target>
 
   <!-- Build Rust library before building the project -->
   <Target Name="BuildRustLibrary"

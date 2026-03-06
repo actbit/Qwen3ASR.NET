@@ -15,4 +15,11 @@
     <PackageReference Include="PvRecorder" Version="1.2.0" />
   </ItemGroup>
 
+  <!-- Copy native DLL to output directory after build -->
+  <Target Name="CopyNativeDllToOutput" AfterTargets="Build">
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\..\..\src\Qwen3ASR.NET.Runtime.Win-x64\runtimes\win-x64\native\qwen3_asr_ffi.dll"
+          DestinationFolder="$(OutputPath)"
+          Condition="Exists('$(MSBuildProjectDirectory)\..\..\src\Qwen3ASR.NET.Runtime.Win-x64\runtimes\win-x64\native\qwen3_asr_ffi.dll')" />
+  </Target>
+
 </Project>

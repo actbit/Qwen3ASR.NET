@@ -2,7 +2,7 @@
   "profiles": {
     "Qwen3ASR.NET.Realtime": {
       "commandName": "Project",
-      "commandLineArgs": "-d 0 -l ja"
+      "commandLineArgs": "-d 0 -l ja --vad-threshold 0.04 --cuda"
     }
   }
 }
