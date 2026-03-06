@@ -63,6 +63,7 @@
 
     <!-- Patch files and submodule directories -->
     <Qwen3AsrPatchFile>$(MSBuildThisFileDirectory)patches\qwen3-asr-cuda.patch</Qwen3AsrPatchFile>
+    <Qwen3AsrMemoryPatchFile>$(MSBuildThisFileDirectory)patches\qwen3-asr-streaming-memory.patch</Qwen3AsrMemoryPatchFile>
     <Qwen3AsrSubmoduleDir>$(MSBuildThisFileDirectory)patches\qwen3-asr-rs</Qwen3AsrSubmoduleDir>
     <CandlePatchFile>$(MSBuildThisFileDirectory)patches\candle-kernels-skip-moe.patch</CandlePatchFile>
     <CandleSubmoduleDir>$(MSBuildThisFileDirectory)patches\candle</CandleSubmoduleDir>
@@ -88,8 +89,24 @@
 
     <Message Importance="high" Text="Applied qwen3-asr-rs CUDA patch"
              Condition="'$(Qwen3PatchCheckExitCode)' == '0'" />
-    <Message Importance="low" Text="qwen3-asr-rs patch already applied or not needed"
+    <Message Importance="low" Text="qwen3-asr-rs CUDA patch already applied or not needed"
              Condition="'$(Qwen3PatchCheckExitCode)' != '0'" />
+
+    <!-- Apply qwen3-asr-rs streaming memory patch (limit buffer growth in streaming mode) -->
+    <Exec Command="git -C &quot;$(Qwen3AsrSubmoduleDir)&quot; apply --check &quot;$(Qwen3AsrMemoryPatchFile)&quot; 2&gt;nul"
+          ContinueOnError="true">
+      <Output TaskParameter="ExitCode" PropertyName="Qwen3MemoryPatchCheckExitCode" />
+    </Exec>
+
+    <Exec Command="git -C &quot;$(Qwen3AsrSubmoduleDir)&quot; apply &quot;$(Qwen3AsrMemoryPatchFile)&quot;"
+          Condition="'$(Qwen3MemoryPatchCheckExitCode)' == '0'">
+      <Output TaskParameter="ExitCode" PropertyName="Qwen3MemoryPatchApplyExitCode" />
+    </Exec>
+
+    <Message Importance="high" Text="Applied qwen3-asr-rs streaming memory patch"
+             Condition="'$(Qwen3MemoryPatchCheckExitCode)' == '0'" />
+    <Message Importance="low" Text="qwen3-asr-rs memory patch already applied or not needed"
+             Condition="'$(Qwen3MemoryPatchCheckExitCode)' != '0'" />
 
     <!-- Apply candle-kernels patch (skip MOE for broader GPU support) -->
     <Exec Command="git -C &quot;$(CandleSubmoduleDir)&quot; apply --check &quot;$(CandlePatchFile)&quot; 2&gt;nul"

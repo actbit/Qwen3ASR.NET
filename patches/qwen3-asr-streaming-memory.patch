@@ -1,0 +1,83 @@
+diff --git a/qwen3_asr/src/inference/streaming.rs b/qwen3_asr/src/inference/streaming.rs
+index db7e2ed..372df5f 100644
+--- a/qwen3_asr/src/inference/streaming.rs
++++ b/qwen3_asr/src/inference/streaming.rs
+@@ -677,6 +677,23 @@ impl<'a> AsrStream<'a> {
+             self.buffer_offset = 0;
+         }
+ 
++        // Trim feature extractor buffers when rolling window is enabled
++        // to bound memory usage for long-running streams
++        if let Some(audio_window_sec) = self.opts.audio_window_sec {
++            // Add some margin to the window to avoid cutting off useful context
++            // Use 1.5x the window size as the trim threshold
++            let margin_factor = 1.5f32;
++            let max_samples = ((audio_window_sec * margin_factor) * SAMPLE_RATE_HZ as f32) as usize;
++            // Only trim if we have significantly more data than needed
++            // to avoid frequent trimming operations
++            let min_samples_before_trim = (audio_window_sec * SAMPLE_RATE_HZ as f32) as usize;
++            if self.features.wav_len() > min_samples_before_trim {
++                self.features.trim_to_max_samples(max_samples);
++                // Clear audio cache since the feature indices have shifted
++                self.audio_cache = None;
++            }
++        }
++
+         Ok(out)
+     }
+ 
+diff --git a/qwen3_asr/src/processor/feature_extractor.rs b/qwen3_asr/src/processor/feature_extractor.rs
+index b223e6f..3db1941 100644
+--- a/qwen3_asr/src/processor/feature_extractor.rs
++++ b/qwen3_asr/src/processor/feature_extractor.rs
+@@ -189,6 +189,50 @@ impl StreamingFeatureExtractor {
+         self.compressed_max_log
+     }
+ 
++    /// Trim internal buffers to keep only the most recent samples.
++    ///
++    /// This is used in rolling-window streaming mode to bound memory usage.
++    /// When `audio_window_sec` is set, we don't need to keep audio older than
++    /// the window since it won't be used for inference.
++    ///
++    /// # Arguments
++    /// * `max_samples` - Maximum number of audio samples to keep. Older samples
++    ///   will be discarded along with their corresponding feature frames.
++    pub fn trim_to_max_samples(&mut self, max_samples: usize) {
++        if self.wav.len() <= max_samples {
++            return;
++        }
++
++        // Calculate how many samples to remove
++        let samples_to_remove = self.wav.len() - max_samples;
++
++        // Calculate the frame boundary for trimming
++        // Each frame corresponds to hop_length samples
++        let frames_to_remove = samples_to_remove / self.cfg.hop_length;
++
++        if frames_to_remove == 0 {
++            return;
++        }
++
++        // Remove old audio samples
++        let samples_actually_remove = frames_to_remove * self.cfg.hop_length;
++        self.wav.drain(..samples_actually_remove);
++
++        // Remove corresponding feature frames
++        for row in &mut self.raw_log_spec {
++            row.drain(..frames_to_remove);
++        }
++        for row in &mut self.input_features {
++            row.drain(..frames_to_remove);
++        }
++        self.feature_attention_mask.drain(..frames_to_remove);
++    }
++
++    /// Returns the hop_length (samples per frame) for this extractor.
++    pub fn hop_length(&self) -> usize {
++        self.cfg.hop_length
++    }
++
+     fn update(&mut self) -> Result<()> {
+         let frames_total = self.wav.len() / self.cfg.hop_length;
+         let old_frames = self.feature_attention_mask.len();
