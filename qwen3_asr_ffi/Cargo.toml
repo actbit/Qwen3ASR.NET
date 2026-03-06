@@ -14,8 +14,8 @@ name = "qwen3_asr_ffi"
 crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
-# Qwen3-ASR Rust implementation
-qwen3_asr = { git = "https://github.com/lumosimmo/qwen3-asr-rs", branch = "main" }
+# Qwen3-ASR Rust implementation (patched for CUDA contiguous tensor support)
+qwen3_asr = { path = "../patches/qwen3-asr-rs/qwen3_asr" }
 
 # Candle ML framework
 candle-core = "0.9"
@@ -42,7 +42,7 @@ metal = ["candle-core/metal", "candle-nn/metal", "candle-transformers/metal"]
 
 # Patch candle-kernels for RTX 20 series support (SM75+)
 [patch.crates-io]
-candle-kernels = { path = "../patches/candle-kernels" }
+candle-kernels = { path = "../patches/candle/candle-kernels" }
 
 [profile.release]
 opt-level = 3
