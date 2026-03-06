@@ -215,10 +215,9 @@ class Program
             ChunkSizeSec = 0.5f,
             UnfixedChunkNum = 2,
             UnfixedTokenNum = 5,
-            MaxNewTokens = 128,  // Reduced for lower memory usage
-            // Rolling window - smaller for faster processing and lower memory
-            AudioWindowSec = 3.0f,  // Reduced from 5.0f
-            TextWindowTokens = 20   // Reduced from 30
+            MaxNewTokens = 256,      // Allow longer utterances
+            AudioWindowSec = 15.0f,  // Keep ~15 seconds of audio context
+            TextWindowTokens = 100   // Keep ~100 tokens of text context
         });
 
         var audioBuffer = new List<float>();
@@ -327,8 +326,7 @@ class Program
                     // Display partial result if changed
                     if (partial.Text != lastPartialText && !string.IsNullOrEmpty(partial.Text))
                     {
-                        // Clear previous line and write new text
-                        Console.Write($"\r{new string(' ', lastPartialText.Length)}\r{partial.Text}");
+                        Console.WriteLine(partial.Text);
                         lastPartialText = partial.Text;
                     }
 
