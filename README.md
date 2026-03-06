@@ -36,6 +36,60 @@ Available runtime packages:
 
 ## Quick Start
 
+### Basic Setup
+
+```csharp
+using Qwen3ASR.NET;
+using Qwen3ASR.NET.Enums;
+using Qwen3ASR.NET.Models;
+```
+
+### Model Loading
+
+Models are automatically downloaded from HuggingFace on first use and cached locally:
+
+```csharp
+// Load from HuggingFace (cached after first download)
+using var asr = await Qwen3Asr.FromPretrainedAsync("Qwen/Qwen3-ASR-0.6B");
+
+// Load from local path
+using var asr = await Qwen3Asr.FromPretrainedAsync("/path/to/model");
+
+// With forced aligner for word-level timestamps
+using var asr = await Qwen3Asr.FromPretrainedAsync(
+    "Qwen/Qwen3-ASR-0.6B",
+    forcedAlignerPath: "Qwen/Qwen3-ForcedAligner-0.6B",
+    DeviceType.Cpu
+);
+```
+
+**Available Models:**
+| Model | Size | Description |
+|-------|------|-------------|
+| `Qwen/Qwen3-ASR-0.6B` | ~1.2GB | Fast, good accuracy (recommended) |
+| `Qwen/Qwen3-ASR-1.8B` | ~3.5GB | Higher accuracy, slower |
+| `Qwen/Qwen3-ForcedAligner-0.6B` | ~200MB | For word timestamps |
+
+### Audio Requirements
+
+- **Format**: WAV (PCM), or raw float32 samples
+- **Sample Rate**: 16kHz (recommended), other rates are auto-converted
+- **Channels**: Mono (stereo is automatically mixed down)
+- **Bit Depth**: 16-bit or 32-bit float
+
+```csharp
+// WAV file (auto-converted if needed)
+var result = await asr.TranscribeFileAsync("audio.wav");
+
+// Raw float32 samples (must be 16kHz mono, normalized -1.0 to 1.0)
+float[] samples = new float[16000]; // 1 second of audio
+var result = await asr.TranscribeAsync(samples, 16000);
+
+// WAV bytes (from HTTP upload, etc.)
+byte[] wavBytes = GetWavBytesFromSomewhere();
+var result = await asr.TranscribeWavBytesAsync(wavBytes);
+```
+
 ### Offline Transcription
 
 ```csharp
@@ -130,7 +184,118 @@ foreach (var result in results)
 }
 ```
 
-### GPU Acceleration
+### Word-Level Timestamps
+
+```csharp
+using var asr = await Qwen3Asr.FromPretrainedAsync(
+    "Qwen/Qwen3-ASR-0.6B",
+    forcedAlignerPath: "Qwen/Qwen3-ForcedAligner-0.6B"
+);
+
+var result = await asr.TranscribeFileAsync("audio.wav", new TranscriptionOptions
+{
+    Language = Language.Japanese,
+    ReturnTimestamps = true
+});
+
+Console.WriteLine($"Text: {result.Text}");
+if (result.Timestamps != null)
+{
+    foreach (var ts in result.Timestamps)
+    {
+        Console.WriteLine($"[{ts.Start:F2}s - {ts.End:F2}s] {ts.Text}");
+    }
+}
+```
+
+### Language Detection
+
+```csharp
+using var asr = await Qwen3Asr.FromPretrainedAsync("Qwen/Qwen3-ASR-0.6B");
+
+// Auto-detect language
+var result = await asr.TranscribeFileAsync("audio.wav", new TranscriptionOptions
+{
+    Language = Language.Auto  // or omit (default is Auto)
+});
+Console.WriteLine($"Detected: {result.Language}");
+Console.WriteLine($"Text: {result.Text}");
+
+// Force specific language for better accuracy
+var resultJp = await asr.TranscribeFileAsync("audio.wav", new TranscriptionOptions
+{
+    Language = Language.Japanese
+});
+```
+
+### Context-Aware Transcription
+
+Provide context for domain-specific terminology:
+
+```csharp
+var result = await asr.TranscribeFileAsync("medical_audio.wav", new TranscriptionOptions
+{
+    Language = Language.Japanese,
+    Context = "医療・診療録"  // Helps recognize medical terms
+});
+```
+
+### Error Handling
+
+```csharp
+using Qwen3ASR.NET;
+
+try
+{
+    using var asr = await Qwen3Asr.FromPretrainedAsync("Qwen/Qwen3-ASR-0.6B");
+    var result = await asr.TranscribeFileAsync("audio.wav");
+    Console.WriteLine(result.Text);
+}
+catch (Qwen3AsrException ex)
+{
+    Console.WriteLine($"ASR Error: {ex.Message}");
+    // Common errors:
+    // - Model not found
+    // - Invalid audio format
+    // - CUDA out of memory
+}
+catch (FileNotFoundException ex)
+{
+    Console.WriteLine($"File not found: {ex.FileName}");
+}
+```
+
+### Performance Tips
+
+```csharp
+// 1. Use GPU when available
+using var asr = await Qwen3Asr.FromPretrainedAsync(
+    "Qwen/Qwen3-ASR-0.6B",
+    DeviceType.Cuda  // ~10x faster than CPU
+);
+
+// 2. Reuse model instance for multiple transcriptions
+// DON'T: Load model for each file
+// DO: Load once, transcribe many times
+using var asr = await Qwen3Asr.FromPretrainedAsync("Qwen/Qwen3-ASR-0.6B");
+foreach (var file in files)
+{
+    var result = await asr.TranscribeFileAsync(file);
+}
+
+// 3. For streaming, use rolling windows to limit memory
+await using var stream = asr.StartStream(new StreamOptions
+{
+    AudioWindowSec = 3.0f,
+    TextWindowTokens = 20
+});
+
+// 4. Adjust batch size for batch processing
+var results = await asr.TranscribeBatchAsync(files, new TranscriptionOptions
+{
+    MaxBatchSize = 16  // Lower if out of memory
+});
+```
 
 ```csharp
 // CUDA (NVIDIA GPU)
@@ -145,6 +310,54 @@ using var asr = await Qwen3Asr.FromPretrainedAsync(
     DeviceType.Metal
 );
 ```
+
+### GPU Selection (Multi-GPU Systems)
+
+For systems with multiple GPUs, you can select a specific GPU:
+
+```csharp
+// Set GPU index before loading model
+Environment.SetEnvironmentVariable("CUDA_VISIBLE_DEVICES", "1"); // Use GPU 1
+
+using var asr = await Qwen3Asr.FromPretrainedAsync(
+    "Qwen/Qwen3-ASR-0.6B",
+    DeviceType.Cuda
+);
+```
+
+### Memory Optimization for Streaming
+
+For long-running streaming sessions, use rolling windows to limit memory usage:
+
+```csharp
+await using var stream = asr.StartStream(new StreamOptions
+{
+    Language = Language.Japanese,
+    ChunkSizeSec = 0.5f,
+    UnfixedChunkNum = 2,
+    UnfixedTokenNum = 5,
+    MaxNewTokens = 128,          // Reduced for lower memory
+    // Rolling windows - limit memory for long streams
+    AudioWindowSec = 3.0f,       // Keep only last 3 seconds of audio context
+    TextWindowTokens = 20        // Keep only last 20 tokens of text context
+});
+```
+
+This prevents memory from growing indefinitely during long streaming sessions by trimming old audio samples and text tokens that are no longer needed for accurate transcription.
+
+## Documentation
+
+- **[Parameters & Configuration](docs/parameters.md)** / **[日本語](docs/parameters.ja.md)**
+  - TranscriptionOptions and StreamOptions detailed explanation
+  - Parameter effects and recommended configurations
+  - Model selection guide
+  - Error handling
+
+- **[GPU Configuration Guide](docs/gpu-config.md)** / **[日本語](docs/gpu-config.ja.md)**
+  - CUDA (NVIDIA GPU) setup and troubleshooting
+  - Metal (macOS) setup
+  - Multi-GPU configuration
+  - Performance benchmarks
 
 ## API Reference
 
@@ -238,6 +451,7 @@ Supported languages: `Auto`, `Japanese`, `English`, `Chinese`, `Korean`, `French
 
 - .NET SDK 8.0+
 - Rust 1.75+ with cargo
+- Git (for submodule initialization)
 - Target Rust toolchains:
   ```bash
   rustup target add x86_64-pc-windows-msvc
@@ -245,10 +459,17 @@ Supported languages: `Auto`, `Japanese`, `English`, `Chinese`, `Korean`, `French
   rustup target add x86_64-apple-darwin
   rustup target add aarch64-apple-darwin
   ```
+- For CUDA builds: CUDA Toolkit 11.x+ and Visual Studio with C++ workload
 
 ### Build
 
 ```bash
+# Clone with submodules
+git clone --recursive https://github.com/actbit/Qwen3ASR.NET.git
+
+# Or initialize submodules after clone
+git submodule update --init --recursive
+
 # Build everything (Rust FFI is built automatically via MSBuild)
 dotnet build
 
@@ -266,9 +487,28 @@ dotnet pack --configuration Release
 ```
 
 The native Rust library (`qwen3_asr_ffi`) is automatically built when building the Runtime packages. MSBuild will:
-1. Run `cargo build --release` before the .NET build
-2. Copy the resulting native library to the `runtimes/<platform>/native/` folder
-3. Include it in the NuGet package
+1. Apply patches to submodules (CUDA fix, memory optimization)
+2. Run `cargo build --release` before the .NET build
+3. Copy the resulting native library to the `runtimes/<platform>/native/` folder
+4. Include it in the NuGet package
+
+### Patch System
+
+This project uses git submodules with patch files for dependency management:
+
+```
+patches/
+├── qwen3-asr-rs/              # Git submodule (qwen3-asr-rs repository)
+├── candle/                    # Git submodule (huggingface/candle repository)
+├── qwen3-asr-cuda.patch       # CUDA contiguous tensor fix
+├── qwen3-asr-streaming-memory.patch  # Memory limit for streaming
+└── candle-kernels-skip-moe.patch     # Skip MOE kernels for RTX 20 series
+```
+
+**Patches are applied automatically during build:**
+1. `qwen3-asr-cuda.patch` - Fixes "matmul is only supported for contiguous tensors" error on CUDA
+2. `qwen3-asr-streaming-memory.patch` - Limits memory usage in streaming mode with rolling windows
+3. `candle-kernels-skip-moe.patch` - Skips MOE kernel compilation for broader GPU support (SM75+)
 
 ## Architecture
 
@@ -295,6 +535,48 @@ The native Rust library (`qwen3_asr_ffi`) is automatically built when building t
 │  └──────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────┘
 ```
+
+## Samples
+
+This repository includes sample applications demonstrating various use cases:
+
+### Qwen3ASR.NET.Realtime
+
+Real-time transcription from microphone input with VAD (Voice Activity Detection).
+
+```bash
+# Run with CPU
+dotnet run --project samples/Qwen3ASR.NET.Realtime -- --cpu
+
+# Run with CUDA GPU
+dotnet run --project samples/Qwen3ASR.NET.Realtime -- --gpu
+
+# Run with specific GPU index
+dotnet run --project samples/Qwen3ASR.NET.Realtime -- --gpu --gpu-index 1
+
+# Specify language
+dotnet run --project samples/Qwen3ASR.NET.Realtime -- -l Japanese
+
+# Disable VAD (process all audio including silence)
+dotnet run --project samples/Qwen3ASR.NET.Realtime -- --no-vad
+
+# Use with forced aligner for word timestamps
+dotnet run --project samples/Qwen3ASR.NET.Realtime -- -a Qwen/Qwen3-ForcedAligner-0.6B
+```
+
+**Command-line options:**
+| Option | Description |
+|--------|-------------|
+| `-m, --model <path>` | Model path or HuggingFace ID |
+| `-a, --aligner <path>` | Forced aligner for timestamps |
+| `-l, --language <lang>` | Language code (Japanese, English, etc.) |
+| `-d, --device <index>` | Audio input device index |
+| `--cpu` | Force CPU inference |
+| `--gpu, --cuda` | Use CUDA GPU |
+| `--gpu-index <index>` | GPU device index (0, 1, etc.) |
+| `--metal` | Use Metal GPU (macOS only) |
+| `--no-vad` | Disable Voice Activity Detection |
+| `--vad-threshold <val>` | VAD energy threshold (default: 0.01) |
 
 ## License
 
