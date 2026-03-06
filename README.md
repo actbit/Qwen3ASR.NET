@@ -394,7 +394,6 @@ Real-time transcription session with rolling context support.
 | Property | Type | Description |
 |----------|------|-------------|
 | `IsActive` | `bool` | Whether stream is still active |
-| `SegmentCount` | `int` | Number of segments processed |
 | `Duration` | `float` | Total duration processed (seconds) |
 
 ### `TranscriptionOptions`

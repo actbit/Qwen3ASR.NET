@@ -212,10 +212,40 @@ catch (Qwen3AsrException ex)
 | `FromPretrainedAsync(modelPath, device)` | 学習済みモデルを読み込み |
 | `TranscribeFileAsync(filePath, options)` | 音声ファイルを文字起こし |
 | `TranscribeAsync(samples, sampleRate, options)` | 音声サンプルを文字起こし |
+| `TranscribeAsync(stream, options)` | WAVストリームを文字起こし |
 | `TranscribeWavBytesAsync(wavBytes, options)` | WAVバイト列を文字起こし |
 | `TranscribeFileStreamAsync(...)` | ファイルをストリーミング処理 |
+| `TranscribeSamplesStreamAsync(...)` | サンプルをストリーミング処理 |
+| `TranscribeStreamAsync(...)` | ストリームをストリーミング処理 |
 | `TranscribeBatchAsync(filePaths, options)` | 複数ファイルを一括処理 |
 | `StartStream(options)` | ストリーミング文字起こし開始 |
+| `GetSupportedLanguagesAsync()` | サポート言語一覧取得 |
+| `GetVersion()` | ライブラリバージョン取得 |
+
+### `StreamingTranscriber` ストリーミングセッション
+
+| メソッド | 説明 |
+|--------|------|
+| `PushAsync(samples)` | 音声サンプルをプッシュ（16kHzモノラルf32） |
+| `GetPartialResult()` | 現在の部分結果を取得 |
+| `FinishAsync()` | 終了して最終結果を取得 |
+
+| プロパティ | 型 | 説明 |
+|----------|------|-------------|
+| `IsActive` | `bool` | ストリームがアクティブか |
+| `Duration` | `float` | 処理済み総秒数 |
+
+### `TranscriptionOptions` 文字起こし設定
+
+| プロパティ | 型 | デフォルト | 説明 |
+|----------|------|---------|------|
+| `Language` | `Language` | `Auto` | 文字起こし言語 |
+| `Context` | `string?` | `null` | 文脈情報（精度向上用） |
+| `ReturnTimestamps` | `bool` | `false` | タイムスタンプを返すか |
+| `MaxNewTokens` | `int` | `0` | 最大トークン数（0=デフォルト） |
+| `MaxBatchSize` | `int` | `32` | バッチ処理サイズ |
+| `ChunkMaxSec` | `float?` | `null` | 最大チャンク秒数 |
+| `BucketByLength` | `bool` | `false` | 長さでバケッティング |
 
 ### `StreamOptions` ストリーミング設定
 
