@@ -8,8 +8,8 @@
     <Description>Qwen3-ASR speech recognition for .NET - Meta package that includes all platforms. For smaller deployments, use Qwen3ASR.NET.Core with specific runtime packages.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>
 
-    <!-- This is a meta package with no code -->
-    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <!-- Meta package: references all runtimes. A managed placeholder assembly is included
+         so NuGet accepts this as a TFM-targeted package (avoids NU5128/NU5017). -->
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
   </PropertyGroup>
 
@@ -21,6 +21,7 @@
     <ProjectReference Include="..\Qwen3ASR.NET.Core\Qwen3ASR.NET.Core.csproj" />
     <ProjectReference Include="..\Qwen3ASR.NET.Runtime.Win-x64\Qwen3ASR.NET.Runtime.Win-x64.csproj" />
     <ProjectReference Include="..\Qwen3ASR.NET.Runtime.Linux-x64\Qwen3ASR.NET.Runtime.Linux-x64.csproj" />
+    <ProjectReference Include="..\Qwen3ASR.NET.Runtime.Linux-arm64\Qwen3ASR.NET.Runtime.Linux-arm64.csproj" />
     <ProjectReference Include="..\Qwen3ASR.NET.Runtime.OSX-x64\Qwen3ASR.NET.Runtime.OSX-x64.csproj" />
     <ProjectReference Include="..\Qwen3ASR.NET.Runtime.OSX-arm64\Qwen3ASR.NET.Runtime.OSX-arm64.csproj" />
   </ItemGroup>

@@ -4,9 +4,9 @@
     <TargetFramework>net8.0</TargetFramework>
 
     <!-- Package metadata -->
-    <PackageId>Qwen3ASR.NET.Runtime.OSX-x64</PackageId>
-    <Description>Native runtime for Qwen3ASR.NET (macOS x64/Intel with Metal support)</Description>
-    <PackageTags>speech-recognition;asr;qwen;ai;ml;transcription;native;runtime;metal</PackageTags>
+    <PackageId>Qwen3ASR.NET.Runtime.Linux-arm64</PackageId>
+    <Description>Native runtime for Qwen3ASR.NET (Linux ARM64/aarch64, CPU only - e.g. Raspberry Pi 5, Rockchip RK3588)</Description>
+    <PackageTags>speech-recognition;asr;qwen;ai;ml;transcription;native;runtime;arm64;aarch64;cpu</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
 
     <!-- Primarily ships native binaries; a managed placeholder assembly is included
@@ -16,7 +16,7 @@
 
   <ItemGroup>
     <None Include="runtimes\**\*" Pack="true" PackagePath="runtimes" />
-    <Content Include="runtimes\osx-x64\native\libqwen3_asr_ffi.dylib" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="runtimes\linux-arm64\native\libqwen3_asr_ffi.so" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\README.md" Pack="true" PackagePath="" />
   </ItemGroup>
 

@@ -9,8 +9,8 @@
     <PackageTags>speech-recognition;asr;qwen;ai;ml;transcription;native;runtime;metal</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
 
-    <!-- This package contains native binaries, not managed code -->
-    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <!-- Primarily ships native binaries; a managed placeholder assembly is included
+         so NuGet accepts this as a TFM-targeted package (avoids NU5128/NU5017). -->
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
   </PropertyGroup>
 

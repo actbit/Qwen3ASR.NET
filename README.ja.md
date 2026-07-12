@@ -33,8 +33,11 @@
 利用可能なランタイムパッケージ:
 - `Qwen3ASR.NET.Runtime.Win-x64` - Windows x64
 - `Qwen3ASR.NET.Runtime.Linux-x64` - Linux x64
+- `Qwen3ASR.NET.Runtime.Linux-arm64` - Linux ARM64/aarch64（CPUのみ、Raspberry Pi 5、RK3588 等）
 - `Qwen3ASR.NET.Runtime.OSX-x64` - macOS Intel
 - `Qwen3ASR.NET.Runtime.OSX-arm64` - macOS Apple Silicon
+
+> **注（Linux ARM64）**: Linux ARM64（Raspberry Pi 5、Rockchip RK3588 等）では CPU 推論（`DeviceType.Cpu`）のみサポートします。candle-core は Mali GPU や RKNN NPU のバックエンドを持たないため、このプラットフォームでは GPU/NPU アクセラレーションはありません。
 
 ## クイックスタート
 
