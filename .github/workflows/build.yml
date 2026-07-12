@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 env:
-  DOTNET_VERSION: '8.0.x'
+  DOTNET_VERSION: '9.0.x'
   RUST_VERSION: '1.75'
 
 jobs:
@@ -47,6 +47,10 @@ jobs:
             os: ubuntu-latest
             artifact: linux-x64
             ext: so
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact: linux-arm64
+            ext: so
           - target: x86_64-apple-darwin
             os: macos-latest
             artifact: osx-x64
@@ -65,6 +69,12 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Install aarch64 cross-compilation toolchain
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -78,6 +88,10 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Build Rust library
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
         run: |
           cd qwen3_asr_ffi
           cargo build --release --target ${{ matrix.target }}
@@ -124,6 +138,7 @@ jobs:
           # Copy native libraries to runtime package directories
           cp -r artifacts/native-win-x64/runtimes/* src/Qwen3ASR.NET.Runtime.Win-x64/
           cp -r artifacts/native-linux-x64/runtimes/* src/Qwen3ASR.NET.Runtime.Linux-x64/
+          cp -r artifacts/native-linux-arm64/runtimes/* src/Qwen3ASR.NET.Runtime.Linux-arm64/
           cp -r artifacts/native-osx-x64/runtimes/* src/Qwen3ASR.NET.Runtime.OSX-x64/
           cp -r artifacts/native-osx-arm64/runtimes/* src/Qwen3ASR.NET.Runtime.OSX-arm64/
 
@@ -133,35 +148,50 @@ jobs:
 
       - name: Pack NuGet packages
         run: |
+          # Native libraries are already built and copied by the build-rust job above.
+          # Pass -p:SkipRustBuild=true so pack does not re-invoke cargo
+          # (no Rust toolchain or submodules are present in this job).
           dotnet pack src/Qwen3ASR.NET.Core/Qwen3ASR.NET.Core.csproj \
             --configuration Release \
             --output ./nupkg \
-            -p:Version=${{ steps.version.outputs.VERSION }}
+            -p:Version=${{ steps.version.outputs.VERSION }} \
+            -p:SkipRustBuild=true
 
           dotnet pack src/Qwen3ASR.NET.Runtime.Win-x64/Qwen3ASR.NET.Runtime.Win-x64.csproj \
             --configuration Release \
             --output ./nupkg \
-            -p:Version=${{ steps.version.outputs.VERSION }}
+            -p:Version=${{ steps.version.outputs.VERSION }} \
+            -p:SkipRustBuild=true
 
           dotnet pack src/Qwen3ASR.NET.Runtime.Linux-x64/Qwen3ASR.NET.Runtime.Linux-x64.csproj \
             --configuration Release \
             --output ./nupkg \
-            -p:Version=${{ steps.version.outputs.VERSION }}
+            -p:Version=${{ steps.version.outputs.VERSION }} \
+            -p:SkipRustBuild=true
+
+          dotnet pack src/Qwen3ASR.NET.Runtime.Linux-arm64/Qwen3ASR.NET.Runtime.Linux-arm64.csproj \
+            --configuration Release \
+            --output ./nupkg \
+            -p:Version=${{ steps.version.outputs.VERSION }} \
+            -p:SkipRustBuild=true
 
           dotnet pack src/Qwen3ASR.NET.Runtime.OSX-x64/Qwen3ASR.NET.Runtime.OSX-x64.csproj \
             --configuration Release \
             --output ./nupkg \
-            -p:Version=${{ steps.version.outputs.VERSION }}
+            -p:Version=${{ steps.version.outputs.VERSION }} \
+            -p:SkipRustBuild=true
 
           dotnet pack src/Qwen3ASR.NET.Runtime.OSX-arm64/Qwen3ASR.NET.Runtime.OSX-arm64.csproj \
             --configuration Release \
             --output ./nupkg \
-            -p:Version=${{ steps.version.outputs.VERSION }}
+            -p:Version=${{ steps.version.outputs.VERSION }} \
+            -p:SkipRustBuild=true
 
           dotnet pack src/Qwen3ASR.NET/Qwen3ASR.NET.csproj \
             --configuration Release \
             --output ./nupkg \
-            -p:Version=${{ steps.version.outputs.VERSION }}
+            -p:Version=${{ steps.version.outputs.VERSION }} \
+            -p:SkipRustBuild=true
 
       - name: Publish to NuGet
         run: |

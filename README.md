@@ -33,8 +33,11 @@
 Available runtime packages:
 - `Qwen3ASR.NET.Runtime.Win-x64` - Windows x64
 - `Qwen3ASR.NET.Runtime.Linux-x64` - Linux x64
+- `Qwen3ASR.NET.Runtime.Linux-arm64` - Linux ARM64/aarch64 (CPU only, e.g. Raspberry Pi 5, RK3588)
 - `Qwen3ASR.NET.Runtime.OSX-x64` - macOS Intel
 - `Qwen3ASR.NET.Runtime.OSX-arm64` - macOS Apple Silicon
+
+> **Note (Linux ARM64)**: On Linux ARM64 (e.g. Raspberry Pi 5, Rockchip RK3588), only CPU inference (`DeviceType.Cpu`) is supported. candle-core has no backend for Mali GPUs or RKNN NPUs, so there is no GPU/NPU acceleration on this platform.
 
 ## Quick Start
 
@@ -457,6 +460,7 @@ Supported languages: `Auto`, `Japanese`, `English`, `Chinese`, `Korean`, `French
   ```bash
   rustup target add x86_64-pc-windows-msvc
   rustup target add x86_64-unknown-linux-gnu
+  rustup target add aarch64-unknown-linux-gnu
   rustup target add x86_64-apple-darwin
   rustup target add aarch64-apple-darwin
   ```
